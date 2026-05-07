@@ -39,27 +39,27 @@ export default {
       }
 
       if (request.method === "POST" && url.pathname === "/api/client/register") {
-        return handleRegisterClient(request, env);
+        return await handleRegisterClient(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/api/client/me") {
-        return handleGetClient(request, env);
+        return await handleGetClient(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/api/client/settings") {
-        return handleUpdateClient(request, env);
+        return await handleUpdateClient(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/api/client/test-alpaca") {
-        return handleClientAlpacaTest(request, env);
+        return await handleClientAlpacaTest(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/api/client/manual-trade") {
-        return handleClientManualTrade(request, env);
+        return await handleClientManualTrade(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/api/client/logs") {
-        return handleClientLogs(request, env);
+        return await handleClientLogs(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/control") {
@@ -70,7 +70,7 @@ export default {
       }
 
       if (request.method === "POST" && url.pathname === `/telegram/${getSecretPath(env)}`) {
-        return handleTelegramWebhook(request, env);
+        return await handleTelegramWebhook(request, env);
       }
 
       return corsJson({ ok: false, error: "not found" }, 404);
@@ -785,7 +785,20 @@ async function previewAlert(){const r=await fetch('/test',{method:'POST',headers
 async function manualTrade(){if(!confirm('Place this Alpaca paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);await loadLogs();await loadMe();}
 async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
 function forgetClient(){localStorage.removeItem('kalkiClientId');localStorage.removeItem('kalkiClientToken');location.reload();}
-health();loadMe().catch(()=>{});
+function requireConnected(){
+  if(state.clientId&&state.clientToken)return true;
+  show('Connect Alpaca paper first with Save / Connect. Then Auto ON/OFF, Pause Today, Test Alpaca, and manual paper orders will work.');
+  return false;
+}
+const originalSaveSettings=saveSettings;
+saveSettings=async function(extra={}){if(!requireConnected())return;return originalSaveSettings(extra);}
+const originalTestAlpaca=testAlpaca;
+testAlpaca=async function(){if(!requireConnected())return;return originalTestAlpaca();}
+const originalManualTrade=manualTrade;
+manualTrade=async function(){if(!requireConnected())return;return originalManualTrade();}
+const originalLoadLogs=loadLogs;
+loadLogs=async function(){if(!requireConnected())return;return originalLoadLogs();}
+health();loadMe().catch(()=>show('Connect Alpaca paper first.'));
 </script>
 </body>
 </html>`;
