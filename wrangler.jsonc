@@ -7,7 +7,8 @@
     "ALPACA_BASE_URL": "https://paper-api.alpaca.markets",
     "SECRET_PATH": "kalki2026",
     "POSITION_SIZE": "1000",
-    "MIN_GRADE": "B"
+    "MIN_GRADE": "B",
+    "SOURCE_CHAT_ID": "-1003967721534"
   },
   "kv_namespaces": [
     {
