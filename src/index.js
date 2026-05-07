@@ -805,7 +805,7 @@ function renderDashboard() {
     *{box-sizing:border-box;margin:0;padding:0}body{min-height:100vh;background:linear-gradient(rgba(0,212,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.035) 1px,transparent 1px),var(--bg);background-size:40px 40px;color:var(--text);font:14px/1.45 var(--ui)}
     .container{max-width:1320px;margin:0 auto;padding:18px 20px 36px}header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:4px 0 16px;border-bottom:1px solid var(--border);margin-bottom:20px}
     .logo{display:flex;gap:12px;align-items:center}.logo-icon{width:38px;height:38px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;color:#001018;font-weight:900;box-shadow:0 0 22px rgba(0,212,255,.25)}h1{font-size:22px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);line-height:1}.logo span{display:block;margin-top:5px;font:10px var(--mono);letter-spacing:4px;color:var(--muted);text-transform:uppercase}
-    .header-actions{display:flex;align-items:center;gap:12px}.mode-badge{font:11px var(--mono);letter-spacing:2px;padding:5px 10px;border:1px solid var(--warn);border-radius:4px;color:var(--warn);background:rgba(255,179,71,.08);text-transform:uppercase}.icon-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--accent);cursor:pointer;font-size:17px}.status-pill{font:12px var(--mono);letter-spacing:1px;text-transform:uppercase;padding:10px 16px;border-radius:6px;border:1px solid var(--border);background:var(--surface2)}.status-pill.on{color:var(--accent2);border-color:var(--accent2)}.status-pill.off{color:var(--danger);border-color:var(--danger)}
+    .header-actions{display:flex;align-items:center;gap:12px}.mode-badge{font:11px var(--mono);letter-spacing:2px;padding:5px 10px;border:1px solid var(--warn);border-radius:4px;color:var(--warn);background:rgba(255,179,71,.08);text-transform:uppercase}.icon-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--accent);cursor:pointer;font-size:17px}.bot-toggle{position:relative;display:flex;align-items:center;gap:10px;padding:8px 16px;border-radius:6px;border:1px solid var(--accent2);background:rgba(0,255,136,.05);color:var(--accent2);font:12px var(--mono);font-weight:900;letter-spacing:1px;text-transform:uppercase;cursor:pointer}.bot-toggle:disabled{opacity:.55;cursor:not-allowed}.bot-toggle.off{border-color:var(--danger);color:var(--danger);background:rgba(255,59,107,.06)}.bot-switch{width:42px;height:22px;border-radius:999px;background:rgba(0,255,136,.16);border:1px solid var(--border);position:relative}.bot-switch:after{content:'';position:absolute;top:3px;left:23px;width:14px;height:14px;border-radius:50%;background:var(--accent2);transition:left .2s,background .2s}.bot-toggle.off .bot-switch{background:rgba(255,59,107,.12)}.bot-toggle.off .bot-switch:after{left:3px;background:var(--danger)}
     .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;position:relative;overflow:hidden}.stat-card:after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent);opacity:.55}.stat-card.green:after{background:var(--accent2)}.stat-card.warn:after{background:var(--warn)}.stat-label{font:10px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:7px}.stat-value{font:27px var(--mono);font-weight:800;color:var(--text);line-height:1}.stat-value.accent{color:var(--accent)}.stat-value.green{color:var(--accent2)}.stat-value.red{color:var(--danger)}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}.panel{background:var(--surface);border:1px solid var(--border);border-radius:9px;overflow:hidden}.panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}.panel-title{font:12px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--accent)}.panel-body{min-height:160px;max-height:310px;overflow:auto}.empty{padding:34px 16px;text-align:center;color:var(--muted);font:12px var(--mono);letter-spacing:1px}
     .alert-item,.pos-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:13px 16px;border-bottom:1px solid rgba(26,48,64,.55)}.badge-grade{width:38px;height:38px;border-radius:6px;display:grid;place-items:center;border:1px solid rgba(0,212,255,.35);background:rgba(0,212,255,.12);color:var(--accent);font-weight:900}.ticker{font:15px var(--mono);font-weight:900;color:#fff}.meta{font:11px var(--mono);color:var(--muted);margin-top:3px}.prices{display:flex;gap:10px;flex-wrap:wrap;font:11px var(--mono);margin-top:4px}.entry{color:var(--text)}.stop{color:var(--danger)}.target{color:var(--accent2)}.pill{font:10px var(--mono);letter-spacing:1px;padding:4px 8px;border-radius:4px;border:1px solid rgba(0,255,136,.25);color:var(--accent2);background:rgba(0,255,136,.08);text-transform:uppercase}.pill.skip{border-color:rgba(255,179,71,.25);color:var(--warn);background:rgba(255,179,71,.08)}.pill.err{border-color:rgba(255,59,107,.25);color:var(--danger);background:rgba(255,59,107,.08)}
@@ -819,7 +819,7 @@ function renderDashboard() {
 <main class="container">
   <header>
     <div class="logo"><div class="logo-icon">⚡</div><div><h1>Kalki Auto-Trader</h1><span>Algorithmic Execution Engine</span></div></div>
-    <div class="header-actions"><div class="mode-badge" id="mode">Cloudflare</div><button class="icon-btn" onclick="openSettings()" title="Settings">⚙</button><div class="status-pill off" id="statusPill">Not Connected</div></div>
+    <div class="header-actions"><div class="mode-badge" id="mode">Cloudflare</div><button class="icon-btn" onclick="openSettings()" title="Settings">⚙</button><button class="bot-toggle off" id="botToggle" onclick="toggleBot()" disabled><span class="bot-switch"></span><span id="botToggleLabel">Not Connected</span></button></div>
   </header>
 
   <section class="stats">
@@ -903,8 +903,9 @@ function applyClient(data){
   document.getElementById('clientName').textContent=c.name||'Connected';
   document.getElementById('enabled').textContent=c.enabled?'ON':'OFF';
   document.getElementById('enabled').className='stat-value '+(c.enabled?'green':'red');
-  document.getElementById('statusPill').textContent=c.enabled?'Bot Active':'Bot Paused';
-  document.getElementById('statusPill').className='status-pill '+(c.enabled?'on':'off');
+  document.getElementById('botToggle').disabled=false;
+  document.getElementById('botToggle').className='bot-toggle '+(c.enabled?'':'off');
+  document.getElementById('botToggleLabel').textContent=c.enabled?'Bot Active':'Bot Paused';
   document.getElementById('dayTrades').textContent=data.day?.tradeCount ?? '--';
   document.getElementById('dayNotional').textContent='$'+Number(data.day?.notional||0).toFixed(2);
   document.getElementById('gradeStat').textContent=c.minGrade||'B';
@@ -925,7 +926,7 @@ async function registerClient(){
   if(data.ok){state.clientId=data.client.id;state.clientToken=data.token;localStorage.setItem('kalkiClientId',state.clientId);localStorage.setItem('kalkiClientToken',state.clientToken);applyClient(data);closeSettings();loadLogs();}
 }
 async function loadMe(){
-  if(!state.clientId||!state.clientToken){document.getElementById('clientName').textContent='Setup';document.getElementById('enabled').textContent='OFF';document.getElementById('statusPill').textContent='Not Connected';return;}
+  if(!state.clientId||!state.clientToken){document.getElementById('clientName').textContent='Setup';document.getElementById('enabled').textContent='OFF';document.getElementById('botToggle').disabled=true;document.getElementById('botToggle').className='bot-toggle off';document.getElementById('botToggleLabel').textContent='Not Connected';return;}
   const r=await fetch('/api/client/me',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)applyClient(data);
 }
 async function saveSettings(extra={}){
@@ -934,6 +935,7 @@ async function saveSettings(extra={}){
   const r=await fetch('/api/client/settings',{method:'POST',headers:headers(),body:JSON.stringify(body)});const data=await r.json();show(data);if(data.ok)applyClient(data);
 }
 async function setEnabled(enabled){await saveSettings({enabled});}
+async function toggleBot(){if(!requireConnected())return;const isOn=!document.getElementById('botToggle').classList.contains('off');await setEnabled(!isOn);}
 async function pauseToday(){await saveSettings({pauseToday:true});}
 async function clearPause(){await saveSettings({clearPause:true});}
 async function testAlpaca(){const r=await fetch('/api/client/test-alpaca',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
