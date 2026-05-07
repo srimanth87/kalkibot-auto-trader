@@ -28,6 +28,14 @@ wrangler secret put ALPACA_KEY_ID
 wrangler secret put ALPACA_SECRET_KEY
 ```
 
+Telegram source channel/group:
+
+```bash
+wrangler secret put SOURCE_CHAT_ID
+```
+
+Use the numeric Telegram chat id for the channel/group that posts the alerts, usually starting with `-100...`. If `SOURCE_CHAT_ID` is set, alerts from any other chat are ignored.
+
 Optional Telegram confirmation secrets:
 
 ```bash
@@ -44,7 +52,7 @@ npm run deploy
 Register Telegram:
 
 ```bash
-curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://your-worker.workers.dev/telegram/kalki2026"
+curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://kalki-alpaca-autotrader.srimanthgada87.workers.dev/telegram/kalki2026"
 ```
 
 ## Endpoints
@@ -57,6 +65,4 @@ curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://your-w
 
 ## Alpaca Notes
 
-The default endpoint is live trading: `https://api.alpaca.markets`.
-
-If you ever want to test safely, switch `ALPACA_BASE_URL` to `https://paper-api.alpaca.markets` and use paper credentials. Otherwise keep your live endpoint and live credentials.
+The default endpoint is paper trading: `https://paper-api.alpaca.markets`.

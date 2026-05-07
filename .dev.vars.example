@@ -4,5 +4,6 @@ ALPACA_SECRET_KEY=replace-with-your-alpaca-secret-key
 SECRET_PATH=kalki2026
 POSITION_SIZE=1000
 MIN_GRADE=B
+SOURCE_CHAT_ID=-1001234567890
 TELEGRAM_BOT_TOKEN=optional-telegram-bot-token
 TELEGRAM_CHAT_ID=optional-chat-id

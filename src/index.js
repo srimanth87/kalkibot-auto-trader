@@ -27,6 +27,7 @@ export default {
           min_grade: getMinGrade(env),
           position_size: getPositionSize(env),
           webhook_path: `/telegram/${getSecretPath(env)}`,
+          source_chat_id: getSourceChatId(env) || null,
         });
       }
 
@@ -78,8 +79,18 @@ export default {
 };
 
 async function handleTelegramWebhook(request, env) {
-  const { text } = await readAlertPayload(request);
+  const { text, chatId } = await readAlertPayload(request);
   if (!text) return corsJson({ ok: true, skipped: "no message text" });
+
+  const sourceChatId = getSourceChatId(env);
+  if (sourceChatId && String(chatId || "") !== sourceChatId) {
+    return corsJson({
+      ok: true,
+      skipped: "different Telegram source chat",
+      received_chat_id: chatId || null,
+      expected_chat_id: sourceChatId,
+    });
+  }
 
   const alert = parseKalkiAlert(text);
   if (!alert) return corsJson({ ok: true, skipped: "not a Kalki alert" });
@@ -129,14 +140,20 @@ async function handleDashboardTrade(request, env) {
 
 async function readAlertPayload(request) {
   const body = await request.json().catch(() => ({}));
+  const post =
+    body?.message ||
+    body?.channel_post ||
+    body?.edited_message ||
+    body?.edited_channel_post ||
+    null;
+
   return {
     text:
       body?.text ||
-      body?.message?.text ||
-      body?.channel_post?.text ||
-      body?.edited_message?.text ||
-      body?.edited_channel_post?.text ||
+      post?.text ||
+      post?.caption ||
       "",
+    chatId: post?.chat?.id != null ? String(post.chat.id) : null,
   };
 }
 
@@ -342,6 +359,10 @@ function getMinGrade(env) {
 
 function getSecretPath(env) {
   return String(env.SECRET_PATH || "kalki2026").replace(/^\/+/, "");
+}
+
+function getSourceChatId(env) {
+  return String(env.SOURCE_CHAT_ID || env.SOURCE_CHANNEL_ID || "").trim();
 }
 
 function normalizeGrade(grade) {
