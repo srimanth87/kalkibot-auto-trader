@@ -36,6 +36,10 @@ export default {
         return corsJson({ ok: true, webhooks: await listWebhookLogs(env, 25) });
       }
 
+      if (request.method === "GET" && url.pathname === "/debug/telegram") {
+        return corsJson({ ok: true, telegram: await getTelegramWebhookInfo(env) });
+      }
+
       if (request.method === "POST" && url.pathname === "/test") {
         const { text } = await readAlertPayload(request);
         const alert = parseKalkiAlert(text);
@@ -579,6 +583,24 @@ async function sendTelegram(env, text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text }),
   });
+}
+
+async function getTelegramWebhookInfo(env) {
+  if (!env.TELEGRAM_BOT_TOKEN) return { configured: false, error: "TELEGRAM_BOT_TOKEN is missing" };
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) return { configured: false, error: data.description || `Telegram HTTP ${response.status}` };
+  const result = data.result || {};
+  return {
+    configured: Boolean(result.url),
+    url: result.url || "",
+    has_custom_certificate: Boolean(result.has_custom_certificate),
+    pending_update_count: result.pending_update_count || 0,
+    last_error_date: result.last_error_date || null,
+    last_error_message: result.last_error_message || null,
+    max_connections: result.max_connections || null,
+    allowed_updates: result.allowed_updates || [],
+  };
 }
 
 function isTradeableGrade(grade, minGrade) {
