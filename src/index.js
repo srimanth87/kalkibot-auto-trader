@@ -40,6 +40,16 @@ export default {
         return corsJson({ ok: true, preview: true, alert, decision: buildTradeDecision(env, alert) });
       }
 
+      if (request.method === "POST" && url.pathname === "/alpaca/account") {
+        const body = await request.json().catch(() => ({}));
+        const account = await getAlpacaAccount({
+          endpoint: body.endpoint || getAlpacaBaseUrl(env),
+          key: body.key || env.ALPACA_KEY_ID,
+          secret: body.secret || env.ALPACA_SECRET_KEY,
+        });
+        return corsJson({ ok: true, account });
+      }
+
       if (request.method === "POST" && url.pathname === "/control") {
         const body = await request.json().catch(() => ({}));
         if (typeof body.enabled !== "boolean") {
@@ -194,6 +204,36 @@ async function placeAlpacaBracketOrder(env, alert, shares) {
   }
 
   return data;
+}
+
+async function getAlpacaAccount({ endpoint, key, secret }) {
+  if (!endpoint || !key || !secret) {
+    throw new Error("Alpaca endpoint, key, and secret are required");
+  }
+
+  const response = await fetch(`${String(endpoint).replace(/\/+$/, "")}/v2/account`, {
+    method: "GET",
+    headers: {
+      "APCA-API-KEY-ID": key,
+      "APCA-API-SECRET-KEY": secret,
+      Accept: "application/json",
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || data?.error || `Alpaca account request failed with HTTP ${response.status}`);
+  }
+
+  return {
+    id: data.id,
+    status: data.status,
+    currency: data.currency,
+    buying_power: data.buying_power,
+    portfolio_value: data.portfolio_value,
+    trading_blocked: data.trading_blocked,
+    account_blocked: data.account_blocked,
+  };
 }
 
 function isTradeableGrade(grade, minGrade) {
