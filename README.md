@@ -2,6 +2,8 @@
 
 Standalone Cloudflare Worker project for Kalki alerts and Alpaca bracket orders. This folder is intentionally separate from the older Kalki analysis pages.
 
+The hosted app is multi-client: you post alerts in one Telegram channel, and each client connects their own Alpaca paper account in the dashboard.
+
 ## Rules
 
 - Trade Grade A or B only.
@@ -10,7 +12,7 @@ Standalone Cloudflare Worker project for Kalki alerts and Alpaca bracket orders.
 - Submit a buy limit order at entry.
 - Attach a bracket with sell limit at T1 and stop loss at the stop price.
 - Dashboard users connect their own Alpaca paper account from the settings modal.
-- Optional server-side Alpaca secrets can be used for fully automated Telegram trading under one shared account.
+- Each client can turn auto-trading on/off, pause for the day, and set daily trade/dollar limits.
 
 ## Setup
 
@@ -22,14 +24,13 @@ cp .dev.vars.example .dev.vars
 
 Put your real values in `.dev.vars`. Do not commit `.dev.vars`.
 
-Optional Cloudflare Alpaca secrets for server-side Telegram auto-trading:
+Required Cloudflare secret for encrypting client Alpaca credentials:
 
 ```bash
-wrangler secret put ALPACA_KEY_ID
-wrangler secret put ALPACA_SECRET_KEY
+wrangler secret put ENCRYPTION_KEY
 ```
 
-Do not set these to your personal keys if this Worker is intended for other people to use with their own paper accounts. The dashboard supports bring-your-own credentials and sends them per request.
+Use a long random value. Do not lose it after clients connect, because existing encrypted Alpaca credentials depend on it.
 
 Telegram source channel/group:
 
@@ -62,14 +63,17 @@ curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://kalki-
 
 ## Endpoints
 
-- `GET /`: dashboard.
+- `GET /`: hosted client dashboard.
 - `GET /health`: config and status summary.
 - `POST /test`: parse and preview an alert without placing an order.
+- `POST /api/client/register`: create a client profile with encrypted Alpaca paper credentials.
+- `POST /api/client/settings`: update client pause/risk controls.
+- `POST /api/client/manual-trade`: manually place a paper trade for the authenticated client.
 - `POST /control`: pause/resume with `{ "enabled": false }`.
-- `POST /telegram/<SECRET_PATH>`: Telegram webhook that places Alpaca orders.
+- `POST /telegram/<SECRET_PATH>`: Telegram webhook that fans alerts out to enabled clients.
 
 ## Alpaca Notes
 
 The default endpoint is paper trading: `https://paper-api.alpaca.markets`.
 
-For the hosted dashboard, each user should click the settings gear and enter their own Alpaca paper endpoint, key id, and secret. Those values are stored only in that user's browser localStorage.
+For the hosted dashboard, each user enters their own Alpaca paper endpoint, key id, and secret. The browser keeps only the generated client id/token; Alpaca credentials are encrypted in Cloudflare KV so Telegram alerts can place trades even when the user's browser is closed.

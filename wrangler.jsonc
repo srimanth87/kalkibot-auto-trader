@@ -9,6 +9,12 @@
     "POSITION_SIZE": "1000",
     "MIN_GRADE": "B"
   },
+  "kv_namespaces": [
+    {
+      "binding": "AUTOTRADER_KV",
+      "id": "1260ecae368f4e21a39e07584a318f03"
+    }
+  ],
   // Optional: bind a KV namespace as AUTOTRADER_STATE for durable pause/resume.
   // "kv_namespaces": [
   //   {
