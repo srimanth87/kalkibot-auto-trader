@@ -116,9 +116,32 @@ async function handleRegisterClient(request, env) {
 
   const account = await getAlpacaAccount({ endpoint, key, secret });
   const token = makeToken();
+  const duplicate = await findClientByAlpacaAccount(env, account.id);
+  if (duplicate) {
+    duplicate.name = String(body.name || duplicate.name || account.id || "Client").trim().slice(0, 80);
+    duplicate.accountId = account.id;
+    duplicate.endpoint = endpoint;
+    duplicate.credentials = await encryptJson(env, { key, secret });
+    duplicate.tokenHash = await sha256Hex(token);
+    duplicate.enabled = typeof body.enabled === "boolean" ? body.enabled : duplicate.enabled;
+    duplicate.minGrade = normalizeMinGrade(body.minGrade || duplicate.minGrade || DEFAULT_MIN_GRADE);
+    duplicate.positionSize = normalizePositiveNumber(body.positionSize, duplicate.positionSize || DEFAULT_POSITION_SIZE);
+    duplicate.maxTradesPerDay = normalizeOptionalPositiveInteger(body.maxTradesPerDay) ?? duplicate.maxTradesPerDay ?? null;
+    duplicate.maxDollarsPerDay = normalizeOptionalPositiveNumber(body.maxDollarsPerDay) ?? duplicate.maxDollarsPerDay ?? null;
+    duplicate.updatedAt = new Date().toISOString();
+    await saveClient(env, duplicate);
+    await writeClientLog(env, duplicate.id, {
+      type: "client_reconnected",
+      status: "ok",
+      message: "Existing Alpaca account profile reconnected",
+    });
+    return corsJson({ ok: true, reused: true, client: publicClient(duplicate), token, account });
+  }
+
   const client = {
     id: crypto.randomUUID(),
     name: String(body.name || account.id || "Client").trim().slice(0, 80),
+    accountId: account.id,
     endpoint,
     credentials: await encryptJson(env, { key, secret }),
     tokenHash: await sha256Hex(token),
@@ -168,6 +191,7 @@ async function handleUpdateClient(request, env) {
     const secret = String(body.secret || existing.secret || "").trim();
     if (!key || !secret) return corsJson({ ok: false, error: "Alpaca paper key and secret are required" }, 400);
     const account = await getAlpacaAccount({ endpoint, key, secret });
+    client.accountId = account.id;
     client.endpoint = endpoint;
     client.credentials = await encryptJson(env, { key, secret });
     client.name = client.name || account.id || "Client";
@@ -480,10 +504,35 @@ async function listClients(env) {
   return clients;
 }
 
+async function findClientByAlpacaAccount(env, accountId) {
+  if (!accountId) return null;
+  const clients = await listClients(env);
+  for (const client of clients) {
+    if (client.accountId === accountId) return client;
+  }
+
+  for (const client of clients) {
+    try {
+      const credentials = await decryptCredentials(env, client);
+      const account = await getAlpacaAccount({ endpoint: client.endpoint, ...credentials });
+      if (account.id === accountId) {
+        client.accountId = account.id;
+        await saveClient(env, client);
+        return client;
+      }
+    } catch (error) {
+      console.error("Duplicate client lookup failed", { client_id: client.id, message: error instanceof Error ? error.message : "Unknown error" });
+    }
+  }
+
+  return null;
+}
+
 function publicClient(client) {
   return {
     id: client.id,
     name: client.name,
+    accountId: client.accountId || null,
     endpoint: client.endpoint,
     enabled: client.enabled,
     minGrade: client.minGrade,
