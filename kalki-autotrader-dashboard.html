@@ -932,7 +932,18 @@ function saveConfig() {
 }
 
 function getConfig() {
-  return JSON.parse(localStorage.getItem('kalki-autotrader-cfg') || '{}');
+  const saved = JSON.parse(localStorage.getItem('kalki-autotrader-cfg') || '{}');
+  const workerInput = document.getElementById('cfg-worker');
+  const sizeInput = document.getElementById('cfg-size');
+  const gradeInput = document.getElementById('cfg-grade');
+  const targetInput = document.getElementById('cfg-target');
+  return {
+    ...saved,
+    worker: workerInput?.value.trim() || saved.worker || '',
+    size: sizeInput?.value || saved.size || 1000,
+    grade: gradeInput?.value || saved.grade || 'B',
+    target: targetInput?.value || saved.target || 't1',
+  };
 }
 
 function loadAlpacaSettings() {
@@ -1089,7 +1100,7 @@ async function placeAlpacaOrder() {
 
   const workerBase = getWorkerBaseUrl();
   if (!workerBase) {
-    toast('Save the Worker URL first, e.g. http://127.0.0.1:8787/telegram/kalki2026', 'warn');
+    toast('Enter the Worker URL first, e.g. http://127.0.0.1:8787/telegram/kalki2026', 'warn');
     return;
   }
 
