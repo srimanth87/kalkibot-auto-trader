@@ -834,7 +834,8 @@
     <div class="manual-title">🧪 Test Alert (Paste Kalki message)</div>
     <div class="manual-row">
       <textarea id="manualAlert" placeholder="⚡ OKLO&#10;📊 Grade: B | Score: 6/8&#10;💰 Price: $75.27&#10;📈 Entry: $75.27&#10;🛑 Stop: $70 (-7.0%)&#10;🎯 T1: $77 (+2.3%)"></textarea>
-      <button class="test-btn" onclick="testAlert()">▶ Simulate Trade</button>
+      <button class="test-btn" onclick="testAlert()">▶ Simulate Local</button>
+      <button class="test-btn" style="border-color:var(--accent2);color:var(--accent2);" onclick="placeAlpacaOrder()">Place Alpaca Order</button>
       <button class="test-btn" style="border-color:var(--muted);color:var(--muted);" onclick="clearLog()">Clear Log</button>
     </div>
   </div>
@@ -960,7 +961,7 @@ function getAlpacaConfig() {
 }
 
 function normalizeEndpoint(value) {
-  return String(value || '').trim().replace(/\/+$/, '');
+  return String(value || '').trim().replace(/\/+$/, '').replace(/\/v2$/i, '');
 }
 
 function getWorkerBaseUrl() {
@@ -1075,7 +1076,54 @@ async function testAlert() {
   await processAlert(text, true);
 }
 
-async function processAlert(text, isManual = false) {
+async function placeAlpacaOrder() {
+  const text = document.getElementById('manualAlert').value.trim();
+  if (!text) { toast('Paste a Kalki alert first', 'warn'); return; }
+  if (!botActive) { toast('Bot paused — order not sent', 'warn'); return; }
+
+  const cfg = getAlpacaConfig();
+  if (!cfg.endpoint || !cfg.key || !cfg.secret) {
+    toast('Open settings and add Alpaca paper endpoint/key/secret first', 'warn');
+    return;
+  }
+
+  const workerBase = getWorkerBaseUrl();
+  if (!workerBase) {
+    toast('Save the Worker URL first, e.g. http://127.0.0.1:8787/telegram/kalki2026', 'warn');
+    return;
+  }
+
+  const alert = parseKalkiAlert(text);
+  if (!alert) { toast('Could not parse alert format', 'warn'); return; }
+
+  const minGrade = getConfig().grade || 'B';
+  if (!isTradeableGrade(alert.grade, minGrade)) {
+    toast(`${alert.ticker} skipped — Grade ${alert.grade} below threshold`, 'warn');
+    return;
+  }
+
+  const ok = confirm(`Submit Alpaca PAPER bracket order for ${alert.ticker}?`);
+  if (!ok) return;
+
+  try {
+    const r = await fetch(`${workerBase}/trade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, ...cfg }),
+    });
+    const result = await r.json();
+    if (!r.ok || !result.ok || result.skipped) {
+      throw new Error(result.error || result.skipped || 'Order rejected');
+    }
+
+    await processAlert(text, false, result);
+    toast(`Alpaca order submitted: ${result.alpaca_order?.id || result.alpaca_order?.client_order_id || alert.ticker}`, 'success');
+  } catch (e) {
+    toast(`Alpaca order failed: ${e.message}`, 'error');
+  }
+}
+
+async function processAlert(text, isManual = false, providedOrderResult = null) {
   const cfg = getConfig();
   const minGrade = cfg.grade || 'B';
   const posSize = parseFloat(cfg.size || 1000);
@@ -1114,9 +1162,9 @@ async function processAlert(text, isManual = false) {
   }
 
   // Try to call worker if URL configured
-  let orderResult = null;
+  let orderResult = providedOrderResult;
   const workerUrl = cfg.worker;
-  if (workerUrl && !isManual) {
+  if (workerUrl && !isManual && !orderResult) {
     try {
       const r = await fetch(workerUrl, {
         method: 'POST',
@@ -1139,7 +1187,7 @@ async function processAlert(text, isManual = false) {
     stopPrice: alert.stopPrice,
     t1: alert.t1,
     status: 'open',
-    orderId: orderResult?.alpaca_order?.id || orderResult?.id || (isManual ? 'SIM-' + Math.floor(Math.random()*9999) : '—'),
+    orderId: orderResult?.alpaca_order?.id || orderResult?.alpaca_order?.client_order_id || orderResult?.id || (isManual ? 'SIM-' + Math.floor(Math.random()*9999) : '—'),
     timestamp: ts,
     pnl: null,
   };

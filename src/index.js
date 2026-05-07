@@ -50,6 +50,10 @@ export default {
         return corsJson({ ok: true, account });
       }
 
+      if (request.method === "POST" && url.pathname === "/trade") {
+        return handleDashboardTrade(request, env);
+      }
+
       if (request.method === "POST" && url.pathname === "/control") {
         const body = await request.json().catch(() => ({}));
         if (typeof body.enabled !== "boolean") {
@@ -93,6 +97,32 @@ async function handleTelegramWebhook(request, env) {
 
   const alpacaOrder = await placeAlpacaBracketOrder(env, alert, decision.shares);
   await sendTelegram(env, formatConfirmation(alert, decision.shares, alpacaOrder));
+
+  return corsJson({ ok: true, alert, decision, alpaca_order: alpacaOrder });
+}
+
+async function handleDashboardTrade(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const text = body.text || "";
+  if (!text) return corsJson({ ok: false, error: "alert text is required" }, 400);
+
+  const alert = parseKalkiAlert(text);
+  if (!alert) return corsJson({ ok: false, error: "not a Kalki alert" }, 400);
+
+  const decision = buildTradeDecision(env, alert);
+  if (!(await isTradingEnabled(env))) {
+    return corsJson({ ok: true, skipped: "auto-trader paused", alert, decision });
+  }
+
+  if (!decision.tradeable) {
+    return corsJson({ ok: true, skipped: decision.reason, alert, decision });
+  }
+
+  const alpacaOrder = await placeAlpacaBracketOrder(env, alert, decision.shares, {
+    endpoint: body.endpoint,
+    key: body.key,
+    secret: body.secret,
+  });
 
   return corsJson({ ok: true, alert, decision, alpaca_order: alpacaOrder });
 }
@@ -169,14 +199,20 @@ function buildTradeDecision(env, alert) {
   return { tradeable: true, reason: "accepted", shares, position_size: positionSize };
 }
 
-async function placeAlpacaBracketOrder(env, alert, shares) {
-  requireEnv(env, ["ALPACA_KEY_ID", "ALPACA_SECRET_KEY"]);
+async function placeAlpacaBracketOrder(env, alert, shares, overrides = {}) {
+  const endpoint = normalizeAlpacaEndpoint(overrides.endpoint || getAlpacaBaseUrl(env));
+  const key = overrides.key || env.ALPACA_KEY_ID;
+  const secret = overrides.secret || env.ALPACA_SECRET_KEY;
 
-  const response = await fetch(`${getAlpacaBaseUrl(env)}/v2/orders`, {
+  if (!endpoint || !key || !secret) {
+    throw new Error("Alpaca endpoint, key, and secret are required");
+  }
+
+  const response = await fetch(`${endpoint}/v2/orders`, {
     method: "POST",
     headers: {
-      "APCA-API-KEY-ID": env.ALPACA_KEY_ID,
-      "APCA-API-SECRET-KEY": env.ALPACA_SECRET_KEY,
+      "APCA-API-KEY-ID": key,
+      "APCA-API-SECRET-KEY": secret,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
@@ -211,7 +247,7 @@ async function getAlpacaAccount({ endpoint, key, secret }) {
     throw new Error("Alpaca endpoint, key, and secret are required");
   }
 
-  const response = await fetch(`${String(endpoint).replace(/\/+$/, "")}/v2/account`, {
+  const response = await fetch(`${normalizeAlpacaEndpoint(endpoint)}/v2/account`, {
     method: "GET",
     headers: {
       "APCA-API-KEY-ID": key,
@@ -288,7 +324,11 @@ function formatConfirmation(alert, shares, order) {
 }
 
 function getAlpacaBaseUrl(env) {
-  return String(env.ALPACA_BASE_URL || DEFAULT_ALPACA_BASE_URL).replace(/\/+$/, "");
+  return normalizeAlpacaEndpoint(env.ALPACA_BASE_URL || DEFAULT_ALPACA_BASE_URL);
+}
+
+function normalizeAlpacaEndpoint(value) {
+  return String(value || "").trim().replace(/\/+$/, "").replace(/\/v2$/i, "");
 }
 
 function getPositionSize(env) {
