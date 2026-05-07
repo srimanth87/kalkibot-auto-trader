@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kalki Auto-Trader</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #050a0f;
+    --surface: #0a1520;
+    --surface2: #0f1e2e;
+    --border: #1a3040;
+    --accent: #00d4ff;
+    --accent2: #00ff88;
+    --danger: #ff3b6b;
+    --warn: #ffb347;
+    --text: #c8dde8;
+    --muted: #4a6878;
+    --font-mono: 'Share Tech Mono', monospace;
+    --font-ui: 'Rajdhani', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container { position: relative; z-index: 1; max-width: 1300px; margin: 0 auto; padding: 0 20px 40px; }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 38px; height: 38px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 0 20px rgba(0,212,255,0.3);
+  }
+
+  .logo h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .logo span {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+  }
+
+  /* ── KILL SWITCH ── */
+  .kill-switch-wrap {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .mode-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    padding: 4px 10px;
+    background: rgba(255,179,71,0.1);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+
+  .kill-btn {
+    position: relative;
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 18px;
+    border-radius: 6px;
+    border: 1px solid var(--accent2);
+    transition: all 0.2s;
+    overflow: hidden;
+  }
+
+  .kill-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0,255,136,0.08);
+    transition: background 0.2s;
+  }
+
+  .kill-btn.active::before { background: rgba(255,59,107,0.12); }
+  .kill-btn.active { border-color: var(--danger); }
+
+  .kill-toggle {
+    width: 42px; height: 22px;
+    background: var(--surface2);
+    border-radius: 11px;
+    border: 1px solid var(--border);
+    position: relative;
+    transition: background 0.2s;
+  }
+
+  .kill-toggle::after {
+    content: '';
+    position: absolute;
+    left: 3px; top: 3px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: all 0.25s cubic-bezier(.68,-.55,.27,1.55);
+  }
+
+  .kill-btn:not(.active) .kill-toggle { background: rgba(0,255,136,0.15); }
+  .kill-btn:not(.active) .kill-toggle::after { background: var(--accent2); left: 23px; }
+
+  .kill-label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--accent2);
+    text-transform: uppercase;
+  }
+
+  .kill-btn.active .kill-label { color: var(--danger); }
+
+  /* ── CONFIG PANEL ── */
+  .config-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .config-panel::before {
+    content: 'CONFIG';
+    position: absolute;
+    top: 8px; right: 14px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: var(--muted);
+  }
+
+  .config-group label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    font-family: var(--font-mono);
+  }
+
+  .config-group input, .config-group select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .config-group input:focus, .config-group select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0,212,255,0.1);
+  }
+
+  .save-config-btn {
+    align-self: flex-end;
+    background: linear-gradient(135deg, var(--accent), #0099cc);
+    color: #000;
+    border: none;
+    padding: 9px 20px;
+    border-radius: 6px;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+
+  .save-config-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+  .save-config-btn:active { transform: translateY(0); }
+
+  /* ── STATS ROW ── */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0.4;
+  }
+
+  .stat-card.green::after { background: var(--accent2); }
+  .stat-card.red::after { background: var(--danger); }
+  .stat-card.warn::after { background: var(--warn); }
+
+  .stat-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+    font-family: var(--font-mono);
+  }
+
+  .stat-value.up { color: var(--accent2); }
+  .stat-value.down { color: var(--danger); }
+  .stat-value.accent { color: var(--accent); }
+
+  /* ── MAIN GRID ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  /* ── PANEL ── */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-family: var(--font-mono);
+  }
+
+  .pulse-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent2);
+    box-shadow: 0 0 6px var(--accent2);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .panel-body { padding: 0; max-height: 340px; overflow-y: auto; }
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── ALERT ITEM ── */
+  .alert-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(26,48,64,0.5);
+    transition: background 0.15s;
+    animation: slideIn 0.3s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .alert-item:hover { background: rgba(0,212,255,0.03); }
+
+  .alert-badge {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .badge-A { background: rgba(0,255,136,0.15); color: var(--accent2); border: 1px solid rgba(0,255,136,0.3); }
+  .badge-B { background: rgba(0,212,255,0.15); color: var(--accent); border: 1px solid rgba(0,212,255,0.3); }
+  .badge-C { background: rgba(255,179,71,0.1); color: var(--warn); border: 1px solid rgba(255,179,71,0.2); }
+
+  .alert-info { flex: 1; min-width: 0; }
+
+  .alert-ticker {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 1px;
+    font-family: var(--font-mono);
+  }
+
+  .alert-meta {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+  }
+
+  .alert-prices {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    margin-top: 4px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .price-entry { color: var(--text); }
+  .price-stop { color: var(--danger); }
+  .price-t1 { color: var(--accent2); }
+
+  .alert-status {
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .status-pill {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .pill-executed { background: rgba(0,255,136,0.1); color: var(--accent2); border: 1px solid rgba(0,255,136,0.2); }
+  .pill-skipped { background: rgba(255,179,71,0.08); color: var(--warn); border: 1px solid rgba(255,179,71,0.15); }
+  .pill-pending { background: rgba(0,212,255,0.08); color: var(--accent); border: 1px solid rgba(0,212,255,0.15); }
+  .pill-error { background: rgba(255,59,107,0.08); color: var(--danger); border: 1px solid rgba(255,59,107,0.15); }
+
+  .alert-time {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    margin-top: 4px;
+  }
+
+  /* ── POSITIONS ── */
+  .position-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(26,48,64,0.5);
+    align-items: center;
+  }
+
+  .pos-ticker {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+  }
+
+  .pos-detail {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+  }
+
+  .pos-pnl {
+    font-size: 15px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    text-align: right;
+  }
+
+  .pnl-pos { color: var(--accent2); }
+  .pnl-neg { color: var(--danger); }
+
+  .pos-pct {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--muted);
+    text-align: right;
+    margin-top: 2px;
+  }
+
+  /* ── TRADE LOG ── */
+  .trade-log {
+    margin-bottom: 0;
+  }
+
+  .trade-log .panel-body {
+    max-height: 280px;
+  }
+
+  .log-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 80px 80px 80px 90px;
+    gap: 8px;
+    padding: 9px 16px;
+    border-bottom: 1px solid rgba(26,48,64,0.4);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    align-items: center;
+  }
+
+  .log-header {
+    background: var(--surface2);
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+  }
+
+  .log-row:not(.log-header):hover { background: rgba(0,212,255,0.03); }
+
+  .log-win { color: var(--accent2); }
+  .log-loss { color: var(--danger); }
+  .log-open { color: var(--accent); }
+
+  /* ── EMPTY STATE ── */
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
+  .empty-state .icon { font-size: 28px; margin-bottom: 10px; opacity: 0.4; }
+
+  /* ── MANUAL ALERT ── */
+  .manual-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .manual-title {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+    margin-bottom: 12px;
+  }
+
+  .manual-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .manual-row textarea {
+    flex: 1;
+    min-width: 280px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    resize: vertical;
+    min-height: 80px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .manual-row textarea:focus { border-color: var(--accent); }
+
+  .test-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-family: var(--font-ui);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    text-transform: uppercase;
+    align-self: flex-start;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .test-btn:hover {
+    border-color: var(--accent);
+    background: rgba(0,212,255,0.08);
+    box-shadow: 0 0 12px rgba(0,212,255,0.1);
+  }
+
+  /* ── TOAST ── */
+  #toast-container {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .toast {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    max-width: 320px;
+    animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+
+  .toast.success { border-left: 3px solid var(--accent2); }
+  .toast.warn { border-left: 3px solid var(--warn); }
+  .toast.error { border-left: 3px solid var(--danger); }
+
+  @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+
+  /* ── SCROLLBAR ── */
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+  @media (max-width: 900px) {
+    .stats-row { grid-template-columns: repeat(3, 1fr); }
+    .main-grid { grid-template-columns: 1fr; }
+    .log-row { grid-template-columns: 70px 1fr 70px 70px 60px; }
+    .log-row > :last-child { display: none; }
+  }
+
+  @media (max-width: 600px) {
+    .stats-row { grid-template-columns: 1fr 1fr; }
+    .kill-switch-wrap { flex-direction: column; align-items: flex-end; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <h1>Kalki Auto-Trader</h1>
+        <span>Algorithmic Execution Engine</span>
+      </div>
+    </div>
+    <div class="kill-switch-wrap">
+      <div class="mode-badge">Alpaca Mode</div>
+      <button class="kill-btn" id="killBtn" onclick="toggleKill()">
+        <div class="kill-toggle"></div>
+        <span class="kill-label" id="killLabel">Bot Active</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- CONFIG -->
+  <div class="config-panel">
+    <div class="config-group">
+      <label>Alpaca Worker Webhook URL</label>
+      <input type="text" id="cfg-worker" placeholder="http://127.0.0.1:8787/telegram/kalki2026" />
+    </div>
+    <div class="config-group">
+      <label>Position Size ($)</label>
+      <input type="number" id="cfg-size" value="1000" min="100" step="100" />
+    </div>
+    <div class="config-group">
+      <label>Min Grade</label>
+      <select id="cfg-grade">
+        <option value="A">A only</option>
+        <option value="B" selected>B and above</option>
+        <option value="C">C and above</option>
+      </select>
+    </div>
+    <div class="config-group">
+      <label>Profit Target</label>
+      <select id="cfg-target">
+        <option value="t1" selected>T1 only</option>
+        <option value="t2">T2</option>
+        <option value="t1t2">Split T1 + T2</option>
+      </select>
+    </div>
+    <div class="config-group" style="align-self: flex-end;">
+      <button class="save-config-btn" onclick="saveConfig()">Save Config</button>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Alerts Today</div>
+      <div class="stat-value accent" id="stat-alerts">0</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">Trades Taken</div>
+      <div class="stat-value" id="stat-trades">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Open Positions</div>
+      <div class="stat-value accent" id="stat-open">0</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">Realized P&L</div>
+      <div class="stat-value up" id="stat-pnl">$0.00</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Win Rate</div>
+      <div class="stat-value" id="stat-wr">—</div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="main-grid">
+
+    <!-- ALERTS FEED -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">⚡ Alert Feed</span>
+        <div class="pulse-dot" id="liveDot"></div>
+      </div>
+      <div class="panel-body" id="alertFeed">
+        <div class="empty-state">
+          <div class="icon">📡</div>
+          Waiting for Kalki alerts...
+        </div>
+      </div>
+    </div>
+
+    <!-- OPEN POSITIONS -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">📊 Open Positions</span>
+        <span id="pos-count" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);">0 open</span>
+      </div>
+      <div class="panel-body" id="positionsPanel">
+        <div class="empty-state">
+          <div class="icon">💼</div>
+          No open positions
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MANUAL TEST -->
+  <div class="manual-section">
+    <div class="manual-title">🧪 Test Alert (Paste Kalki message)</div>
+    <div class="manual-row">
+      <textarea id="manualAlert" placeholder="⚡ OKLO&#10;📊 Grade: B | Score: 6/8&#10;💰 Price: $75.27&#10;📈 Entry: $75.27&#10;🛑 Stop: $70 (-7.0%)&#10;🎯 T1: $77 (+2.3%)"></textarea>
+      <button class="test-btn" onclick="testAlert()">▶ Simulate Trade</button>
+      <button class="test-btn" style="border-color:var(--muted);color:var(--muted);" onclick="clearLog()">Clear Log</button>
+    </div>
+  </div>
+
+  <!-- TRADE LOG -->
+  <div class="panel trade-log">
+    <div class="panel-header">
+      <span class="panel-title">📋 Trade Log</span>
+      <span id="log-count" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);">0 trades</span>
+    </div>
+    <div class="panel-body">
+      <div class="log-row log-header">
+        <span>Time</span>
+        <span>Ticker</span>
+        <span>Entry</span>
+        <span>Stop</span>
+        <span>T1</span>
+        <span>Status</span>
+      </div>
+      <div id="tradeLog">
+        <div class="empty-state">No trades yet</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+// ─── STATE ─────────────────────────────────────────────────────────────────
+let botActive = true;
+let alerts = [];
+let trades = [];
+let positions = {};
+let stats = { alerts: 0, trades: 0, pnl: 0, wins: 0, losses: 0 };
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+window.onload = () => {
+  loadConfig();
+  loadState();
+  renderAll();
+};
+
+// ─── CONFIG ────────────────────────────────────────────────────────────────
+function loadConfig() {
+  const cfg = JSON.parse(localStorage.getItem('kalki-autotrader-cfg') || '{}');
+  if (cfg.worker) document.getElementById('cfg-worker').value = cfg.worker;
+  if (cfg.size) document.getElementById('cfg-size').value = cfg.size;
+  if (cfg.grade) document.getElementById('cfg-grade').value = cfg.grade;
+  if (cfg.target) document.getElementById('cfg-target').value = cfg.target;
+}
+
+function saveConfig() {
+  const cfg = {
+    worker: document.getElementById('cfg-worker').value.trim(),
+    size: document.getElementById('cfg-size').value,
+    grade: document.getElementById('cfg-grade').value,
+    target: document.getElementById('cfg-target').value,
+  };
+  localStorage.setItem('kalki-autotrader-cfg', JSON.stringify(cfg));
+  toast('Config saved ✓', 'success');
+}
+
+function getConfig() {
+  return JSON.parse(localStorage.getItem('kalki-autotrader-cfg') || '{}');
+}
+
+// ─── KILL SWITCH ────────────────────────────────────────────────────────────
+function toggleKill() {
+  botActive = !botActive;
+  const btn = document.getElementById('killBtn');
+  const lbl = document.getElementById('killLabel');
+  if (!botActive) {
+    btn.classList.add('active');
+    lbl.textContent = 'Bot Paused';
+    toast('⚠️ Auto-trader PAUSED — no new trades will be placed', 'warn');
+  } else {
+    btn.classList.remove('active');
+    lbl.textContent = 'Bot Active';
+    toast('✅ Auto-trader ACTIVE — listening for alerts', 'success');
+  }
+}
+
+// ─── PARSER ────────────────────────────────────────────────────────────────
+function parseKalkiAlert(text) {
+  try {
+    const tickerMatch = text.match(/⚡\s+([A-Z]{1,5})/);
+    if (!tickerMatch) return null;
+
+    const gradeMatch = text.match(/Grade:\s*([A-C][+-]?)/i);
+    const entryMatch = text.match(/Entry:\s*\$?([\d.]+)/);
+    const stopMatch = text.match(/Stop:\s*\$?([\d.]+)/);
+    const t1Match = text.match(/T1:\s*\$?([\d.]+)/);
+    const t2Match = text.match(/T2:\s*\$?([\d.]+)/);
+
+    if (!entryMatch || !stopMatch || !t1Match) return null;
+
+    return {
+      ticker: tickerMatch[1],
+      grade: gradeMatch ? gradeMatch[1].toUpperCase() : 'B',
+      entryPrice: parseFloat(entryMatch[1]),
+      stopPrice: parseFloat(stopMatch[1]),
+      t1: parseFloat(t1Match[1]),
+      t2: t2Match ? parseFloat(t2Match[1]) : null,
+    };
+  } catch { return null; }
+}
+
+function isTradeableGrade(grade, minGrade) {
+  const order = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-'];
+  const minIdx = order.findIndex(g => g.startsWith(minGrade.charAt(0)));
+  const gradeIdx = order.findIndex(g => g === grade || g.startsWith(grade.charAt(0)));
+  if (gradeIdx < 0 || minIdx < 0) return false;
+  return gradeIdx <= minIdx + 2; // within grade band
+}
+
+// ─── TRADE SIMULATION ──────────────────────────────────────────────────────
+async function testAlert() {
+  const text = document.getElementById('manualAlert').value.trim();
+  if (!text) { toast('Paste a Kalki alert first', 'warn'); return; }
+  await processAlert(text, true);
+}
+
+async function processAlert(text, isManual = false) {
+  const cfg = getConfig();
+  const minGrade = cfg.grade || 'B';
+  const posSize = parseFloat(cfg.size || 1000);
+
+  stats.alerts++;
+
+  const alert = parseKalkiAlert(text);
+  if (!alert) {
+    toast('Could not parse alert format', 'warn');
+    return;
+  }
+
+  const gradeOk = isTradeableGrade(alert.grade, minGrade);
+  const ts = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  // Add to alert feed
+  addAlertToFeed(alert, gradeOk ? 'executed' : 'skipped', ts);
+
+  if (!gradeOk) {
+    toast(`⏭ ${alert.ticker} skipped — Grade ${alert.grade} below threshold`, 'warn');
+    updateStats();
+    return;
+  }
+
+  if (!botActive) {
+    toast(`🔴 Bot paused — ${alert.ticker} not traded`, 'warn');
+    addAlertToFeed(alert, 'skipped', ts);
+    updateStats();
+    return;
+  }
+
+  const shares = Math.floor(posSize / alert.entryPrice);
+  if (shares < 1) {
+    toast(`${alert.ticker}: position size too small`, 'warn');
+    return;
+  }
+
+  // Try to call worker if URL configured
+  let orderResult = null;
+  const workerUrl = cfg.worker;
+  if (workerUrl && !isManual) {
+    try {
+      const r = await fetch(workerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { text } })
+      });
+      orderResult = await r.json();
+    } catch(e) {
+      console.warn('Worker call failed:', e);
+    }
+  }
+
+  // Record trade
+  const trade = {
+    id: Date.now(),
+    ticker: alert.ticker,
+    grade: alert.grade,
+    shares,
+    entryPrice: alert.entryPrice,
+    stopPrice: alert.stopPrice,
+    t1: alert.t1,
+    status: 'open',
+    orderId: orderResult?.alpaca_order?.id || orderResult?.id || (isManual ? 'SIM-' + Math.floor(Math.random()*9999) : '—'),
+    timestamp: ts,
+    pnl: null,
+  };
+
+  trades.push(trade);
+  positions[alert.ticker] = { ...trade, currentPrice: alert.entryPrice };
+  stats.trades++;
+
+  saveState();
+  renderAll();
+  toast(`✅ ${alert.ticker} — ${shares} shares @ $${alert.entryPrice.toFixed(2)} | T1: $${alert.t1.toFixed(2)}`, 'success');
+}
+
+// ─── RENDER ────────────────────────────────────────────────────────────────
+function addAlertToFeed(alert, status, ts) {
+  const feed = document.getElementById('alertFeed');
+  const empty = feed.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const el = document.createElement('div');
+  el.className = 'alert-item';
+  const gradeLetter = alert.grade.charAt(0);
+  const pillClass = status === 'executed' ? 'pill-executed' : status === 'skipped' ? 'pill-skipped' : 'pill-pending';
+  const statusLabel = status === 'executed' ? '✓ EXECUTED' : status === 'skipped' ? '⏭ SKIPPED' : '⏳ PENDING';
+
+  el.innerHTML = `
+    <div class="alert-badge badge-${gradeLetter}">${alert.grade}</div>
+    <div class="alert-info">
+      <div class="alert-ticker">${alert.ticker}</div>
+      <div class="alert-prices">
+        <span class="price-entry">Entry $${alert.entryPrice.toFixed(2)}</span>
+        <span class="price-stop">Stop $${alert.stopPrice.toFixed(2)}</span>
+        <span class="price-t1">T1 $${alert.t1.toFixed(2)}</span>
+      </div>
+    </div>
+    <div class="alert-status">
+      <span class="status-pill ${pillClass}">${statusLabel}</span>
+      <div class="alert-time">${ts}</div>
+    </div>
+  `;
+
+  feed.insertBefore(el, feed.firstChild);
+}
+
+function renderPositions() {
+  const panel = document.getElementById('positionsPanel');
+  const posArr = Object.values(positions).filter(p => p.status === 'open');
+  document.getElementById('pos-count').textContent = `${posArr.length} open`;
+
+  if (!posArr.length) {
+    panel.innerHTML = '<div class="empty-state"><div class="icon">💼</div>No open positions</div>';
+    return;
+  }
+
+  panel.innerHTML = posArr.map(p => {
+    const pnl = (p.currentPrice - p.entryPrice) * p.shares;
+    const pct = ((p.currentPrice - p.entryPrice) / p.entryPrice * 100).toFixed(2);
+    const isUp = pnl >= 0;
+    return `
+      <div class="position-item">
+        <div>
+          <div class="pos-ticker">${p.ticker} <span style="color:var(--muted);font-size:11px;">${p.shares}sh</span></div>
+          <div class="pos-detail">Entry $${p.entryPrice.toFixed(2)} · Stop $${p.stopPrice.toFixed(2)} · T1 $${p.t1.toFixed(2)}</div>
+          <div class="pos-detail" style="color:var(--accent);margin-top:2px;">Order #${p.orderId}</div>
+        </div>
+        <div>
+          <div class="pos-pnl ${isUp ? 'pnl-pos' : 'pnl-neg'}">${isUp ? '+' : ''}$${pnl.toFixed(2)}</div>
+          <div class="pos-pct">${isUp ? '+' : ''}${pct}%</div>
+          <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end;">
+            <button onclick="closePosition('${p.ticker}', ${p.t1})" style="font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid var(--accent2);background:rgba(0,255,136,0.08);color:var(--accent2);cursor:pointer;font-family:var(--font-mono);">T1 ✓</button>
+            <button onclick="closePosition('${p.ticker}', ${p.stopPrice})" style="font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid var(--danger);background:rgba(255,59,107,0.08);color:var(--danger);cursor:pointer;font-family:var(--font-mono);">Stop ✗</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderTradeLog() {
+  const log = document.getElementById('tradeLog');
+  document.getElementById('log-count').textContent = `${trades.length} trades`;
+
+  if (!trades.length) {
+    log.innerHTML = '<div class="empty-state">No trades yet</div>';
+    return;
+  }
+
+  log.innerHTML = [...trades].reverse().map(t => {
+    const cls = t.status === 'win' ? 'log-win' : t.status === 'loss' ? 'log-loss' : 'log-open';
+    const statusLabel = t.status === 'win' ? '✓ WIN' : t.status === 'loss' ? '✗ LOSS' : '● OPEN';
+    return `
+      <div class="log-row">
+        <span style="color:var(--muted)">${t.timestamp}</span>
+        <span style="color:#fff;font-weight:700;">${t.ticker} <span style="color:var(--muted);font-weight:400;">${t.grade}</span></span>
+        <span>$${t.entryPrice.toFixed(2)}</span>
+        <span style="color:var(--danger)">$${t.stopPrice.toFixed(2)}</span>
+        <span style="color:var(--accent2)">$${t.t1.toFixed(2)}</span>
+        <span class="${cls}">${statusLabel}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateStats() {
+  document.getElementById('stat-alerts').textContent = stats.alerts;
+  document.getElementById('stat-trades').textContent = stats.trades;
+  document.getElementById('stat-open').textContent = Object.values(positions).filter(p => p.status === 'open').length;
+  const pnl = stats.pnl;
+  const pnlEl = document.getElementById('stat-pnl');
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(2);
+  pnlEl.className = 'stat-value ' + (pnl >= 0 ? 'up' : 'down');
+  const total = stats.wins + stats.losses;
+  document.getElementById('stat-wr').textContent = total ? Math.round(stats.wins / total * 100) + '%' : '—';
+}
+
+function renderAll() {
+  renderPositions();
+  renderTradeLog();
+  updateStats();
+}
+
+// ─── CLOSE POSITION ─────────────────────────────────────────────────────────
+function closePosition(ticker, exitPrice) {
+  const pos = positions[ticker];
+  if (!pos) return;
+
+  const pnl = (exitPrice - pos.entryPrice) * pos.shares;
+  const isWin = pnl > 0;
+
+  stats.pnl += pnl;
+  if (isWin) stats.wins++; else stats.losses++;
+
+  // Update trade record
+  const trade = trades.find(t => t.id === pos.id);
+  if (trade) {
+    trade.status = isWin ? 'win' : 'loss';
+    trade.pnl = pnl;
+  }
+
+  delete positions[ticker];
+  saveState();
+  renderAll();
+
+  toast(`${isWin ? '✅' : '🔴'} ${ticker} closed @ $${exitPrice.toFixed(2)} | P&L: ${isWin ? '+' : ''}$${pnl.toFixed(2)}`, isWin ? 'success' : 'warn');
+}
+
+// ─── PERSIST ───────────────────────────────────────────────────────────────
+function saveState() {
+  localStorage.setItem('kalki-autotrader-state', JSON.stringify({ trades, positions, stats }));
+}
+
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('kalki-autotrader-state') || '{}');
+    if (s.trades) trades = s.trades;
+    if (s.positions) positions = s.positions;
+    if (s.stats) stats = s.stats;
+  } catch {}
+}
+
+function clearLog() {
+  if (!confirm('Clear all trade history?')) return;
+  trades = []; positions = {}; stats = { alerts: 0, trades: 0, pnl: 0, wins: 0, losses: 0 };
+  document.getElementById('alertFeed').innerHTML = '<div class="empty-state"><div class="icon">📡</div>Waiting for Kalki alerts...</div>';
+  saveState();
+  renderAll();
+  toast('Log cleared', 'warn');
+}
+
+// ─── TOAST ─────────────────────────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+</script>
+</body>
+</html>
