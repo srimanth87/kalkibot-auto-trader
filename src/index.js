@@ -26,9 +26,14 @@ export default {
           alpaca_base_url: getAlpacaBaseUrl(env),
           webhook_path: `/telegram/${getSecretPath(env)}`,
           source_chat_id: getSourceChatId(env) || null,
+          has_telegram_bot_token: Boolean(env.TELEGRAM_BOT_TOKEN),
           client_count: clientCount,
           kv_bound: Boolean(env.AUTOTRADER_KV),
         });
+      }
+
+      if (request.method === "GET" && url.pathname === "/debug/webhooks") {
+        return corsJson({ ok: true, webhooks: await listWebhookLogs(env, 25) });
       }
 
       if (request.method === "POST" && url.pathname === "/test") {
@@ -185,10 +190,21 @@ async function handleClientLogs(request, env) {
 
 async function handleTelegramWebhook(request, env) {
   const { text, chatId } = await readAlertPayload(request);
-  if (!text) return corsJson({ ok: true, skipped: "no message text" });
+  await writeWebhookLog(env, { chatId, textPreview: String(text || "").slice(0, 180), stage: "received" });
+  if (!text) {
+    await writeWebhookLog(env, { chatId, stage: "skipped", reason: "no message text" });
+    return corsJson({ ok: true, skipped: "no message text" });
+  }
 
   const sourceChatId = getSourceChatId(env);
   if (sourceChatId && String(chatId || "") !== sourceChatId) {
+    await writeWebhookLog(env, {
+      chatId,
+      stage: "skipped",
+      reason: "different Telegram source chat",
+      expectedChatId: sourceChatId,
+      textPreview: String(text || "").slice(0, 180),
+    });
     return corsJson({
       ok: true,
       skipped: "different Telegram source chat",
@@ -198,10 +214,14 @@ async function handleTelegramWebhook(request, env) {
   }
 
   const alert = parseKalkiAlert(text);
-  if (!alert) return corsJson({ ok: true, skipped: "not a Kalki alert" });
+  if (!alert) {
+    await writeWebhookLog(env, { chatId, stage: "skipped", reason: "not a Kalki alert", textPreview: String(text || "").slice(0, 180) });
+    return corsJson({ ok: true, skipped: "not a Kalki alert" });
+  }
 
   if (!(await isTradingEnabled(env))) {
     await sendTelegram(env, `Auto-trader globally paused. Skipped ${alert.ticker}.`);
+    await writeWebhookLog(env, { chatId, stage: "skipped", reason: "auto-trader globally paused", ticker: alert.ticker });
     return corsJson({ ok: true, skipped: "auto-trader globally paused", alert });
   }
 
@@ -214,6 +234,7 @@ async function handleTelegramWebhook(request, env) {
 
   await writeAlertLog(env, { alert, chatId, results });
   const submitted = results.filter((result) => result.status === "submitted").length;
+  await writeWebhookLog(env, { chatId, stage: "processed", ticker: alert.ticker, clientCount: results.length, submitted });
   await sendTelegram(env, `Processed ${alert.ticker}: ${submitted}/${results.length} client paper order(s) submitted.`);
   return corsJson({ ok: true, alert, submitted_count: submitted, client_count: results.length, results });
 }
@@ -472,6 +493,27 @@ async function listClientLogs(env, clientId, limit = 50) {
 async function writeAlertLog(env, entry) {
   if (!env.AUTOTRADER_KV) return;
   await env.AUTOTRADER_KV.put(`alert:${Date.now()}:${crypto.randomUUID()}`, JSON.stringify({ ...entry, logged_at: new Date().toISOString() }));
+}
+
+async function writeWebhookLog(env, entry) {
+  if (!env.AUTOTRADER_KV) return;
+  await env.AUTOTRADER_KV.put(
+    `webhook:${Date.now()}:${crypto.randomUUID()}`,
+    JSON.stringify({ ...entry, logged_at: new Date().toISOString() }),
+    { expirationTtl: 60 * 60 * 24 * 7 },
+  );
+}
+
+async function listWebhookLogs(env, limit = 25) {
+  if (!env.AUTOTRADER_KV) return [];
+  const listed = await env.AUTOTRADER_KV.list({ prefix: "webhook:" });
+  const keys = listed.keys.slice(-limit).reverse();
+  const logs = [];
+  for (const key of keys) {
+    const log = await env.AUTOTRADER_KV.get(key.name, "json");
+    if (log) logs.push(log);
+  }
+  return logs;
 }
 
 async function getDayStats(env, clientId) {
