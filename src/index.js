@@ -61,6 +61,10 @@ export default {
         return await handleRegisterClient(request, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/api/client/restore") {
+        return await handleRestoreClient(request, env);
+      }
+
       if (request.method === "POST" && url.pathname === "/api/client/me") {
         return await handleGetClient(request, env);
       }
@@ -116,13 +120,15 @@ async function handleRegisterClient(request, env) {
 
   const account = await getAlpacaAccount({ endpoint, key, secret });
   const token = makeToken();
+  const accessCode = makeAccessCode();
   const duplicate = await findClientByAlpacaAccount(env, account.id);
   if (duplicate) {
     duplicate.name = String(body.name || duplicate.name || account.id || "Client").trim().slice(0, 80);
     duplicate.accountId = account.id;
     duplicate.endpoint = endpoint;
     duplicate.credentials = await encryptJson(env, { key, secret });
-    duplicate.tokenHash = await sha256Hex(token);
+    addClientSession(duplicate, await sha256Hex(token));
+    duplicate.accessCodeHash = await sha256Hex(normalizeAccessCode(accessCode));
     duplicate.enabled = typeof body.enabled === "boolean" ? body.enabled : duplicate.enabled;
     duplicate.minGrade = normalizeMinGrade(body.minGrade || duplicate.minGrade || DEFAULT_MIN_GRADE);
     duplicate.positionSize = normalizePositiveNumber(body.positionSize, duplicate.positionSize || DEFAULT_POSITION_SIZE);
@@ -135,7 +141,7 @@ async function handleRegisterClient(request, env) {
       status: "ok",
       message: "Existing Alpaca account profile reconnected",
     });
-    return corsJson({ ok: true, reused: true, client: publicClient(duplicate), token, account });
+    return corsJson({ ok: true, reused: true, client: publicClient(duplicate), token, accessCode, account });
   }
 
   const client = {
@@ -145,6 +151,8 @@ async function handleRegisterClient(request, env) {
     endpoint,
     credentials: await encryptJson(env, { key, secret }),
     tokenHash: await sha256Hex(token),
+    tokenHashes: [await sha256Hex(token)],
+    accessCodeHash: await sha256Hex(normalizeAccessCode(accessCode)),
     enabled: true,
     minGrade: normalizeMinGrade(body.minGrade || DEFAULT_MIN_GRADE),
     positionSize: normalizePositiveNumber(body.positionSize, DEFAULT_POSITION_SIZE),
@@ -162,7 +170,29 @@ async function handleRegisterClient(request, env) {
     message: "Client connected Alpaca paper account",
   });
 
-  return corsJson({ ok: true, client: publicClient(client), token, account });
+  return corsJson({ ok: true, client: publicClient(client), token, accessCode, account });
+}
+
+async function handleRestoreClient(request, env) {
+  requireStorage(env);
+  const body = await request.json().catch(() => ({}));
+  const accessCode = normalizeAccessCode(body.accessCode || body.code || "");
+  if (!accessCode) return corsJson({ ok: false, error: "Client access code is required" }, 400);
+
+  const client = await findClientByAccessCode(env, accessCode);
+  if (!client) return corsJson({ ok: false, error: "Access code not found" }, 404);
+
+  const token = makeToken();
+  addClientSession(client, await sha256Hex(token));
+  client.updatedAt = new Date().toISOString();
+  await saveClient(env, client);
+  await writeClientLog(env, client.id, {
+    type: "client_restored",
+    status: "ok",
+    message: "Client access restored in a browser",
+  });
+
+  return corsJson({ ok: true, client: publicClient(client), token, day: await getDayStats(env, client.id) });
 }
 
 async function handleGetClient(request, env) {
@@ -477,7 +507,10 @@ async function requireClientAuth(request, env) {
 
   const client = await getClient(env, clientId);
   if (!client) throw new Error("Client not found");
-  if ((await sha256Hex(token)) !== client.tokenHash) throw new Error("Invalid client token");
+  const tokenHash = await sha256Hex(token);
+  const validHashes = Array.isArray(client.tokenHashes) ? client.tokenHashes : [];
+  if (client.tokenHash) validHashes.push(client.tokenHash);
+  if (!validHashes.includes(tokenHash)) throw new Error("Invalid client token");
   return { client, body };
 }
 
@@ -528,6 +561,20 @@ async function findClientByAlpacaAccount(env, accountId) {
   return null;
 }
 
+async function findClientByAccessCode(env, accessCode) {
+  const accessCodeHash = await sha256Hex(normalizeAccessCode(accessCode));
+  const clients = await listClients(env);
+  return clients.find((client) => client.accessCodeHash === accessCodeHash) || null;
+}
+
+function addClientSession(client, tokenHash) {
+  const hashes = Array.isArray(client.tokenHashes) ? client.tokenHashes : [];
+  if (client.tokenHash) hashes.push(client.tokenHash);
+  hashes.push(tokenHash);
+  client.tokenHash = tokenHash;
+  client.tokenHashes = [...new Set(hashes)].slice(-10);
+}
+
 function publicClient(client) {
   return {
     id: client.id,
@@ -540,6 +587,7 @@ function publicClient(client) {
     maxTradesPerDay: client.maxTradesPerDay,
     maxDollarsPerDay: client.maxDollarsPerDay,
     pauseUntil: client.pauseUntil,
+    hasAccessCode: Boolean(client.accessCodeHash),
     createdAt: client.createdAt,
     updatedAt: client.updatedAt,
   };
@@ -743,6 +791,24 @@ function makeToken() {
   return base64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
+function makeAccessCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  let code = "";
+  for (const byte of bytes) code += alphabet[byte % alphabet.length];
+  return `KALKI-${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}`;
+}
+
+function normalizeAccessCode(value) {
+  const cleaned = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!cleaned) return "";
+  if (cleaned.startsWith("KALKI")) {
+    const body = cleaned.slice(5);
+    return body ? `KALKI-${body}` : "";
+  }
+  return `KALKI-${cleaned}`;
+}
+
 async function sha256Hex(value) {
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -811,7 +877,7 @@ function renderDashboard() {
     .alert-item,.pos-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:13px 16px;border-bottom:1px solid rgba(26,48,64,.55)}.badge-grade{width:38px;height:38px;border-radius:6px;display:grid;place-items:center;border:1px solid rgba(0,212,255,.35);background:rgba(0,212,255,.12);color:var(--accent);font-weight:900}.ticker{font:15px var(--mono);font-weight:900;color:#fff}.meta{font:11px var(--mono);color:var(--muted);margin-top:3px}.prices{display:flex;gap:10px;flex-wrap:wrap;font:11px var(--mono);margin-top:4px}.entry{color:var(--text)}.stop{color:var(--danger)}.target{color:var(--accent2)}.pill{font:10px var(--mono);letter-spacing:1px;padding:4px 8px;border-radius:4px;border:1px solid rgba(0,255,136,.25);color:var(--accent2);background:rgba(0,255,136,.08);text-transform:uppercase}.pill.skip{border-color:rgba(255,179,71,.25);color:var(--warn);background:rgba(255,179,71,.08)}.pill.err{border-color:rgba(255,59,107,.25);color:var(--danger);background:rgba(255,59,107,.08)}
     .manual{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:18px;margin-bottom:18px}.manual-title{font:11px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px}.manual-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:start}textarea,input,select{width:100%;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:6px;padding:10px 12px;font:13px var(--mono);outline:none}textarea{min-height:92px;resize:vertical}textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,212,255,.08)}button{border:1px solid var(--border);background:var(--surface2);color:var(--accent);border-radius:6px;padding:10px 15px;font-weight:800;cursor:pointer;white-space:nowrap}button.primary{background:linear-gradient(135deg,var(--accent),#0099cc);border-color:transparent;color:#001018}button.good{color:var(--accent2);border-color:rgba(0,255,136,.35)}button.danger{color:var(--danger);border-color:rgba(255,59,107,.35)}button.muted{color:var(--muted)}
     .log-table{width:100%;border-collapse:collapse;font:12px var(--mono)}.log-table th{position:sticky;top:0;background:var(--surface2);color:var(--muted);font-size:10px;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:10px 16px}.log-table td{padding:10px 16px;border-top:1px solid rgba(26,48,64,.5)}.log-open{color:var(--accent)}.log-ok{color:var(--accent2)}.log-skip{color:var(--warn)}.log-err{color:var(--danger)}
-    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:20;padding:18px}.modal-backdrop.open{display:flex}.modal{width:min(760px,100%);max-height:92vh;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 24px 90px rgba(0,0,0,.55)}.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}.modal-title{font:12px var(--mono);letter-spacing:2px;color:var(--accent);text-transform:uppercase}.modal-body{padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.field.full{grid-column:1/-1}.modal-actions{display:flex;gap:10px;justify-content:flex-end;padding:14px 16px;border-top:1px solid var(--border);background:rgba(15,30,46,.55)}.hint{font:11px var(--mono);line-height:1.5;color:var(--muted)}#toast{position:fixed;right:22px;bottom:22px;display:grid;gap:8px;z-index:30}.toast{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:12px 14px;font:12px var(--mono);max-width:360px}.toast.err{border-left-color:var(--danger)}.toast.ok{border-left-color:var(--accent2)}.toast.warn{border-left-color:var(--warn)}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:20;padding:18px}.modal-backdrop.open{display:flex}.modal{width:min(760px,100%);max-height:92vh;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 24px 90px rgba(0,0,0,.55)}.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}.modal-title{font:12px var(--mono);letter-spacing:2px;color:var(--accent);text-transform:uppercase}.modal-body{padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.field.full{grid-column:1/-1}.restore-row{display:grid;grid-template-columns:1fr auto;gap:10px}.access-code{display:none;border:1px solid rgba(0,255,136,.3);background:rgba(0,255,136,.06);color:var(--accent2);border-radius:8px;padding:12px;font:16px var(--mono);font-weight:900;letter-spacing:1px}.access-code.show{display:block}.modal-actions{display:flex;gap:10px;justify-content:flex-end;padding:14px 16px;border-top:1px solid var(--border);background:rgba(15,30,46,.55)}.hint{font:11px var(--mono);line-height:1.5;color:var(--muted)}#toast{position:fixed;right:22px;bottom:22px;display:grid;gap:8px;z-index:30}.toast{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:12px 14px;font:12px var(--mono);max-width:360px}.toast.err{border-left-color:var(--danger)}.toast.ok{border-left-color:var(--accent2)}.toast.warn{border-left-color:var(--warn)}
     @media(max-width:860px){.stats,.grid{grid-template-columns:1fr}.manual-row,.modal-body{grid-template-columns:1fr}.header-actions{flex-wrap:wrap;justify-content:flex-end}.stat-value{font-size:23px}}
   </style>
 </head>
@@ -864,6 +930,8 @@ function renderDashboard() {
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><div class="modal-title">Settings</div><button onclick="closeSettings()">×</button></div>
     <div class="modal-body">
+      <div class="field full"><label>Client Access Code</label><div class="restore-row"><input id="accessCodeInput" placeholder="KALKI-XXXX-XXXX-XXXX" autocomplete="off"><button onclick="restoreClient()">Restore</button></div></div>
+      <div class="field full access-code" id="newAccessCode"></div>
       <div><label>Name</label><input id="name" placeholder="Client name"></div>
       <div><label>Endpoint Base URL</label><input id="endpoint" value="https://paper-api.alpaca.markets"></div>
       <div><label>API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
@@ -873,7 +941,7 @@ function renderDashboard() {
       <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
       <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
       <div class="field full row"><button onclick="pauseToday()">Pause Today</button><button onclick="clearPause()">Clear Pause</button></div>
-      <div class="field full hint">Clients connect their own Alpaca paper account here. Credentials are encrypted in Cloudflare KV and are not shown again after saving. Leave key fields blank to keep the saved credentials.</div>
+      <div class="field full hint">Use Client Access Code to restore this profile from another browser. After Save / Connect, save the generated code somewhere safe. Alpaca credentials are encrypted in Cloudflare KV and are not shown again after saving.</div>
     </div>
     <div class="modal-actions"><button class="danger" onclick="deleteProfile()">Delete Profile</button><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testAlpaca()">Test Alpaca</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
   </div>
@@ -888,6 +956,16 @@ const state = {
 function headers(){return {'content-type':'application/json','x-client-id':state.clientId,'x-client-token':state.clientToken};}
 function toast(msg,type){const box=document.getElementById('toast');const el=document.createElement('div');el.className='toast '+(type||'');el.textContent=msg;box.appendChild(el);setTimeout(()=>el.remove(),4200);}
 function show(data){toast(typeof data==='string'?data:(data.error||data.skipped||data.result?.reason||'Done'),data.ok===false?'err':'ok');}
+function saveBrowserSession(data){
+  state.clientId=data.client.id;state.clientToken=data.token;
+  localStorage.setItem('kalkiClientId',state.clientId);localStorage.setItem('kalkiClientToken',state.clientToken);
+}
+function showAccessCode(code){
+  const el=document.getElementById('newAccessCode');
+  if(!code){el.className='field full access-code';el.textContent='';return;}
+  el.className='field full access-code show';
+  el.textContent='Save this access code: '+code;
+}
 function formSettings(){return {
   name: document.getElementById('name').value,
   endpoint: document.getElementById('endpoint').value,
@@ -923,7 +1001,13 @@ async function health(){
 async function registerClient(){
   const r=await fetch('/api/client/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formSettings())});
   const data=await r.json();show(data);
-  if(data.ok){state.clientId=data.client.id;state.clientToken=data.token;localStorage.setItem('kalkiClientId',state.clientId);localStorage.setItem('kalkiClientToken',state.clientToken);applyClient(data);closeSettings();loadLogs();}
+  if(data.ok){saveBrowserSession(data);applyClient(data);showAccessCode(data.accessCode);loadLogs();toast('Connected. Save the displayed access code for other browsers.','ok');}
+}
+async function restoreClient(){
+  const accessCode=document.getElementById('accessCodeInput').value;
+  const r=await fetch('/api/client/restore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({accessCode})});
+  const data=await r.json();show(data);
+  if(data.ok){saveBrowserSession(data);applyClient(data);showAccessCode('');closeSettings();loadLogs();}
 }
 async function loadMe(){
   if(!state.clientId||!state.clientToken){document.getElementById('clientName').textContent='Setup';document.getElementById('enabled').textContent='OFF';document.getElementById('botToggle').disabled=true;document.getElementById('botToggle').className='bot-toggle off';document.getElementById('botToggleLabel').textContent='Not Connected';return;}
