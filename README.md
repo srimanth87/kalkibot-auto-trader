@@ -49,8 +49,10 @@ wrangler secret put TELEGRAM_CHAT_ID
 Deploy:
 
 ```bash
-npm run deploy
+npm run deploy -- --keep-vars
 ```
+
+Use `--keep-vars` if you set `SOURCE_CHAT_ID` or other variables in the Cloudflare dashboard, so a deploy does not overwrite dashboard-managed values.
 
 Register Telegram:
 
