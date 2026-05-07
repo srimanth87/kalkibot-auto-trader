@@ -664,78 +664,93 @@ function renderDashboard() {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kalki Auto-Trader</title>
   <style>
-    :root{color-scheme:dark;--bg:#07090d;--panel:#101722;--panel2:#151f2d;--line:#26364b;--text:#edf4ff;--muted:#8a99ae;--green:#39d98a;--red:#ff5b7c;--blue:#58a6ff;--amber:#ffcc66}
-    *{box-sizing:border-box}body{margin:0;background:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px),var(--bg);background-size:42px 42px;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,Arial,sans-serif}
-    main{max-width:1180px;margin:0 auto;padding:24px}header{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:18px}h1{font-size:25px;margin:0}.sub{color:var(--muted);font-size:13px;margin-top:4px}
-    .badge{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:7px 10px;color:var(--amber);font-size:12px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
-    .panel{background:rgba(16,23,34,.94);border:1px solid var(--line);border-radius:8px;padding:16px}.span2{grid-column:span 2}.span4{grid-column:span 4}
-    label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}input,select,textarea{width:100%;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:6px;padding:10px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
-    textarea{min-height:132px;resize:vertical}.row{display:flex;gap:10px;flex-wrap:wrap}.stack{display:grid;gap:12px}button{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:6px;padding:10px 12px;font-weight:800;cursor:pointer}button.primary{background:var(--blue);border-color:var(--blue);color:#06101f}button.danger{color:var(--red)}button.good{color:var(--green)}
-    .stat{font:24px ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:3px}.hint{color:var(--muted);font-size:12px;margin-top:8px}.hidden{display:none}.log{white-space:pre-wrap;margin:0;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d7ea;max-height:360px;overflow:auto}
-    @media(max-width:860px){.grid{grid-template-columns:1fr}.span2,.span4{grid-column:auto}header{align-items:flex-start;flex-direction:column}}
+    :root{color-scheme:dark;--bg:#050a0f;--surface:#0a1520;--surface2:#0f1e2e;--border:#1a3040;--accent:#00d4ff;--accent2:#00ff88;--danger:#ff3b6b;--warn:#ffb347;--text:#c8dde8;--muted:#5f788a;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--ui:Inter,system-ui,Arial,sans-serif}
+    *{box-sizing:border-box;margin:0;padding:0}body{min-height:100vh;background:linear-gradient(rgba(0,212,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.035) 1px,transparent 1px),var(--bg);background-size:40px 40px;color:var(--text);font:14px/1.45 var(--ui)}
+    .container{max-width:1320px;margin:0 auto;padding:18px 20px 36px}header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:4px 0 16px;border-bottom:1px solid var(--border);margin-bottom:20px}
+    .logo{display:flex;gap:12px;align-items:center}.logo-icon{width:38px;height:38px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;color:#001018;font-weight:900;box-shadow:0 0 22px rgba(0,212,255,.25)}h1{font-size:22px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);line-height:1}.logo span{display:block;margin-top:5px;font:10px var(--mono);letter-spacing:4px;color:var(--muted);text-transform:uppercase}
+    .header-actions{display:flex;align-items:center;gap:12px}.mode-badge{font:11px var(--mono);letter-spacing:2px;padding:5px 10px;border:1px solid var(--warn);border-radius:4px;color:var(--warn);background:rgba(255,179,71,.08);text-transform:uppercase}.icon-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--accent);cursor:pointer;font-size:17px}.status-pill{font:12px var(--mono);letter-spacing:1px;text-transform:uppercase;padding:10px 16px;border-radius:6px;border:1px solid var(--border);background:var(--surface2)}.status-pill.on{color:var(--accent2);border-color:var(--accent2)}.status-pill.off{color:var(--danger);border-color:var(--danger)}
+    .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;position:relative;overflow:hidden}.stat-card:after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent);opacity:.55}.stat-card.green:after{background:var(--accent2)}.stat-card.warn:after{background:var(--warn)}.stat-label{font:10px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:7px}.stat-value{font:27px var(--mono);font-weight:800;color:var(--text);line-height:1}.stat-value.accent{color:var(--accent)}.stat-value.green{color:var(--accent2)}.stat-value.red{color:var(--danger)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}.panel{background:var(--surface);border:1px solid var(--border);border-radius:9px;overflow:hidden}.panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}.panel-title{font:12px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--accent)}.panel-body{min-height:160px;max-height:310px;overflow:auto}.empty{padding:34px 16px;text-align:center;color:var(--muted);font:12px var(--mono);letter-spacing:1px}
+    .alert-item,.pos-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:13px 16px;border-bottom:1px solid rgba(26,48,64,.55)}.badge-grade{width:38px;height:38px;border-radius:6px;display:grid;place-items:center;border:1px solid rgba(0,212,255,.35);background:rgba(0,212,255,.12);color:var(--accent);font-weight:900}.ticker{font:15px var(--mono);font-weight:900;color:#fff}.meta{font:11px var(--mono);color:var(--muted);margin-top:3px}.prices{display:flex;gap:10px;flex-wrap:wrap;font:11px var(--mono);margin-top:4px}.entry{color:var(--text)}.stop{color:var(--danger)}.target{color:var(--accent2)}.pill{font:10px var(--mono);letter-spacing:1px;padding:4px 8px;border-radius:4px;border:1px solid rgba(0,255,136,.25);color:var(--accent2);background:rgba(0,255,136,.08);text-transform:uppercase}.pill.skip{border-color:rgba(255,179,71,.25);color:var(--warn);background:rgba(255,179,71,.08)}.pill.err{border-color:rgba(255,59,107,.25);color:var(--danger);background:rgba(255,59,107,.08)}
+    .manual{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:18px;margin-bottom:18px}.manual-title{font:11px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px}.manual-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:start}textarea,input,select{width:100%;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:6px;padding:10px 12px;font:13px var(--mono);outline:none}textarea{min-height:92px;resize:vertical}textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,212,255,.08)}button{border:1px solid var(--border);background:var(--surface2);color:var(--accent);border-radius:6px;padding:10px 15px;font-weight:800;cursor:pointer;white-space:nowrap}button.primary{background:linear-gradient(135deg,var(--accent),#0099cc);border-color:transparent;color:#001018}button.good{color:var(--accent2);border-color:rgba(0,255,136,.35)}button.danger{color:var(--danger);border-color:rgba(255,59,107,.35)}button.muted{color:var(--muted)}
+    .log-table{width:100%;border-collapse:collapse;font:12px var(--mono)}.log-table th{position:sticky;top:0;background:var(--surface2);color:var(--muted);font-size:10px;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:10px 16px}.log-table td{padding:10px 16px;border-top:1px solid rgba(26,48,64,.5)}.log-open{color:var(--accent)}.log-ok{color:var(--accent2)}.log-skip{color:var(--warn)}.log-err{color:var(--danger)}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:20;padding:18px}.modal-backdrop.open{display:flex}.modal{width:min(760px,100%);max-height:92vh;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 24px 90px rgba(0,0,0,.55)}.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}.modal-title{font:12px var(--mono);letter-spacing:2px;color:var(--accent);text-transform:uppercase}.modal-body{padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.field.full{grid-column:1/-1}.modal-actions{display:flex;gap:10px;justify-content:flex-end;padding:14px 16px;border-top:1px solid var(--border);background:rgba(15,30,46,.55)}.hint{font:11px var(--mono);line-height:1.5;color:var(--muted)}#toast{position:fixed;right:22px;bottom:22px;display:grid;gap:8px;z-index:30}.toast{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:12px 14px;font:12px var(--mono);max-width:360px}.toast.err{border-left-color:var(--danger)}.toast.ok{border-left-color:var(--accent2)}.toast.warn{border-left-color:var(--warn)}
+    @media(max-width:860px){.stats,.grid{grid-template-columns:1fr}.manual-row,.modal-body{grid-template-columns:1fr}.header-actions{flex-wrap:wrap;justify-content:flex-end}.stat-value{font-size:23px}}
   </style>
 </head>
 <body>
-<main>
+<main class="container">
   <header>
-    <div><h1>Kalki Auto-Trader</h1><div class="sub">Your alerts · each client’s Alpaca paper account · per-client pause and risk controls</div></div>
-    <div class="badge" id="mode">Checking Worker...</div>
+    <div class="logo"><div class="logo-icon">⚡</div><div><h1>Kalki Auto-Trader</h1><span>Algorithmic Execution Engine</span></div></div>
+    <div class="header-actions"><div class="mode-badge" id="mode">Cloudflare</div><button class="icon-btn" onclick="openSettings()" title="Settings">⚙</button><div class="status-pill off" id="statusPill">Not Connected</div></div>
   </header>
 
+  <section class="stats">
+    <div class="stat-card"><div class="stat-label">Client</div><div class="stat-value" id="clientName">--</div></div>
+    <div class="stat-card green"><div class="stat-label">Auto-Trading</div><div class="stat-value" id="enabled">--</div></div>
+    <div class="stat-card"><div class="stat-label">Today Trades</div><div class="stat-value accent" id="dayTrades">0</div></div>
+    <div class="stat-card green"><div class="stat-label">Today Notional</div><div class="stat-value green" id="dayNotional">$0.00</div></div>
+    <div class="stat-card warn"><div class="stat-label">Min Grade</div><div class="stat-value" id="gradeStat">B</div></div>
+  </section>
+
   <section class="grid">
-    <div class="panel"><label>Client</label><div class="stat" id="clientName">--</div></div>
-    <div class="panel"><label>Auto-Trading</label><div class="stat" id="enabled">--</div></div>
-    <div class="panel"><label>Today Trades</label><div class="stat" id="dayTrades">--</div></div>
-    <div class="panel"><label>Today Notional</label><div class="stat" id="dayNotional">--</div></div>
-
     <div class="panel span2">
-      <h3 style="margin-top:0">Connect Alpaca Paper</h3>
-      <div class="stack">
-        <div><label>Name</label><input id="name" placeholder="Client name"></div>
-        <div><label>Endpoint</label><input id="endpoint" value="https://paper-api.alpaca.markets/v2"></div>
-        <div><label>API Key ID</label><input id="key" autocomplete="off"></div>
-        <div><label>API Secret Key</label><input id="secret" type="password" autocomplete="off"></div>
-        <div class="row"><button class="primary" onclick="registerClient()">Save / Connect</button><button onclick="testAlpaca()">Test Alpaca</button><button class="danger" onclick="forgetClient()">Forget This Browser</button></div>
-        <div class="hint">The client id and access token are stored in this browser. Alpaca keys are encrypted in Cloudflare KV for automatic Telegram trading.</div>
-      </div>
+      <div class="panel-header"><span class="panel-title">⚡ Alert Feed</span><span class="pill" id="feedState">Listening</span></div>
+      <div class="panel-body" id="alertFeed"><div class="empty">Waiting for Telegram alerts...</div></div>
     </div>
-
     <div class="panel span2">
-      <h3 style="margin-top:0">Trade Controls</h3>
-      <div class="stack">
-        <div class="row"><button class="good" onclick="setEnabled(true)">Auto ON</button><button class="danger" onclick="setEnabled(false)">Auto OFF</button><button onclick="pauseToday()">Pause Today</button><button onclick="clearPause()">Clear Pause</button></div>
-        <div><label>Min Grade</label><select id="minGrade"><option>A</option><option selected>B</option><option>C</option></select></div>
-        <div><label>Position Size ($)</label><input id="positionSize" type="number" value="1000"></div>
-        <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
-        <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
-        <button class="primary" onclick="saveSettings()">Save Controls</button>
-      </div>
+      <div class="panel-header"><span class="panel-title">📊 Recent Orders</span><span class="meta" id="orderCount">0 logs</span></div>
+      <div class="panel-body" id="orders"><div class="empty">No orders yet</div></div>
     </div>
+  </section>
 
-    <div class="panel span2">
-      <h3 style="margin-top:0">Manual Test Alert</h3>
+  <section class="manual">
+    <div class="manual-title">🧪 Test Alert (Paste Kalki Message)</div>
+    <div class="manual-row">
       <textarea id="alert">⚡ OKLO
 📊 Grade: B | Score: 6/8
 📈 Entry: $75.27
 🛑 Stop: $70
 🎯 T1: $77</textarea>
-      <div class="row" style="margin-top:10px"><button onclick="previewAlert()">Preview</button><button class="primary" onclick="manualTrade()">Place Paper Order</button></div>
-    </div>
-
-    <div class="panel span2">
-      <h3 style="margin-top:0">Logs</h3>
-      <div class="row" style="margin-bottom:10px"><button onclick="loadMe()">Refresh Status</button><button onclick="loadLogs()">Refresh Logs</button></div>
-      <pre class="log" id="out">Ready.</pre>
+      <button onclick="previewAlert()">Preview</button>
+      <button class="primary" onclick="manualTrade()">Place Paper Order</button>
     </div>
   </section>
+
+  <section class="panel">
+    <div class="panel-header"><span class="panel-title">📋 Trade Log</span><button onclick="loadLogs()">Refresh</button></div>
+    <table class="log-table"><thead><tr><th>Time</th><th>Ticker</th><th>Source</th><th>Status</th><th>Detail</th></tr></thead><tbody id="tradeLog"><tr><td colspan="5" class="empty">No trades yet</td></tr></tbody></table>
+  </section>
 </main>
+
+<div class="modal-backdrop" id="settingsModal" onclick="closeSettings(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><div class="modal-title">Settings</div><button onclick="closeSettings()">×</button></div>
+    <div class="modal-body">
+      <div><label>Name</label><input id="name" placeholder="Client name"></div>
+      <div><label>Endpoint</label><input id="endpoint" value="https://paper-api.alpaca.markets/v2"></div>
+      <div><label>API Key ID</label><input id="key" autocomplete="off"></div>
+      <div><label>API Secret Key</label><input id="secret" type="password" autocomplete="off"></div>
+      <div><label>Min Grade</label><select id="minGrade"><option>A</option><option selected>B</option><option>C</option></select></div>
+      <div><label>Position Size ($)</label><input id="positionSize" type="number" value="1000"></div>
+      <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
+      <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
+      <div class="field full row"><button class="good" onclick="setEnabled(true)">Auto ON</button><button class="danger" onclick="setEnabled(false)">Auto OFF</button><button onclick="pauseToday()">Pause Today</button><button onclick="clearPause()">Clear Pause</button></div>
+      <div class="field full hint">Clients connect their own Alpaca paper account here. Credentials are encrypted in Cloudflare KV so automatic Telegram alerts can trade even when this browser is closed.</div>
+    </div>
+    <div class="modal-actions"><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testAlpaca()">Test Alpaca</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
+  </div>
+</div>
+<div id="toast"></div>
+
 <script>
 const state = {
   clientId: localStorage.getItem('kalkiClientId') || '',
   clientToken: localStorage.getItem('kalkiClientToken') || '',
 };
 function headers(){return {'content-type':'application/json','x-client-id':state.clientId,'x-client-token':state.clientToken};}
-function show(data){document.getElementById('out').textContent=typeof data==='string'?data:JSON.stringify(data,null,2);}
+function toast(msg,type){const box=document.getElementById('toast');const el=document.createElement('div');el.className='toast '+(type||'');el.textContent=msg;box.appendChild(el);setTimeout(()=>el.remove(),4200);}
+function show(data){toast(typeof data==='string'?data:(data.error||data.skipped||data.result?.reason||'Done'),data.ok===false?'err':'ok');}
 function formSettings(){return {
   name: document.getElementById('name').value,
   endpoint: document.getElementById('endpoint').value,
@@ -750,8 +765,12 @@ function applyClient(data){
   const c=data.client;if(!c)return;
   document.getElementById('clientName').textContent=c.name||'Connected';
   document.getElementById('enabled').textContent=c.enabled?'ON':'OFF';
+  document.getElementById('enabled').className='stat-value '+(c.enabled?'green':'red');
+  document.getElementById('statusPill').textContent=c.enabled?'Bot Active':'Bot Paused';
+  document.getElementById('statusPill').className='status-pill '+(c.enabled?'on':'off');
   document.getElementById('dayTrades').textContent=data.day?.tradeCount ?? '--';
   document.getElementById('dayNotional').textContent='$'+Number(data.day?.notional||0).toFixed(2);
+  document.getElementById('gradeStat').textContent=c.minGrade||'B';
   document.getElementById('name').value=c.name||'';
   document.getElementById('endpoint').value=c.endpoint||'https://paper-api.alpaca.markets/v2';
   document.getElementById('minGrade').value=c.minGrade||'B';
@@ -761,15 +780,15 @@ function applyClient(data){
 }
 async function health(){
   const r=await fetch('/health');const data=await r.json();
-  document.getElementById('mode').textContent=data.kv_bound?'Cloudflare Ready':'KV Missing';
+  document.getElementById('mode').textContent=data.kv_bound?'Alpaca Paper':'KV Missing';
 }
 async function registerClient(){
   const r=await fetch('/api/client/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formSettings())});
   const data=await r.json();show(data);
-  if(data.ok){state.clientId=data.client.id;state.clientToken=data.token;localStorage.setItem('kalkiClientId',state.clientId);localStorage.setItem('kalkiClientToken',state.clientToken);applyClient(data);}
+  if(data.ok){state.clientId=data.client.id;state.clientToken=data.token;localStorage.setItem('kalkiClientId',state.clientId);localStorage.setItem('kalkiClientToken',state.clientToken);applyClient(data);closeSettings();loadLogs();}
 }
 async function loadMe(){
-  if(!state.clientId||!state.clientToken){show('Connect Alpaca paper first.');return;}
+  if(!state.clientId||!state.clientToken){document.getElementById('clientName').textContent='Setup';document.getElementById('enabled').textContent='OFF';document.getElementById('statusPill').textContent='Not Connected';return;}
   const r=await fetch('/api/client/me',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)applyClient(data);
 }
 async function saveSettings(extra={}){
@@ -781,13 +800,17 @@ async function setEnabled(enabled){await saveSettings({enabled});}
 async function pauseToday(){await saveSettings({pauseToday:true});}
 async function clearPause(){await saveSettings({clearPause:true});}
 async function testAlpaca(){const r=await fetch('/api/client/test-alpaca',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
-async function previewAlert(){const r=await fetch('/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});show(await r.json());}
-async function manualTrade(){if(!confirm('Place this Alpaca paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);await loadLogs();await loadMe();}
-async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
+async function previewAlert(){const r=await fetch('/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.ok)addAlert(data.alert,'preview',data.decision?.reason||'Preview');}
+async function manualTrade(){if(!confirm('Place this Alpaca paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
+async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();if(!data.ok){show(data);return;}renderLogs(data.logs||[]);}
 function forgetClient(){localStorage.removeItem('kalkiClientId');localStorage.removeItem('kalkiClientToken');location.reload();}
+function openSettings(){document.getElementById('settingsModal').classList.add('open');}
+function closeSettings(event){if(event&&event.target.id!=='settingsModal')return;document.getElementById('settingsModal').classList.remove('open');}
+function addAlert(alert,status,detail){const feed=document.getElementById('alertFeed');feed.innerHTML='<div class="alert-item"><div class="badge-grade">'+(alert.grade||'?')+'</div><div><div class="ticker">'+alert.ticker+'</div><div class="prices"><span class="entry">Entry $'+Number(alert.entryPrice).toFixed(2)+'</span><span class="stop">Stop $'+Number(alert.stopPrice).toFixed(2)+'</span><span class="target">T1 $'+Number(alert.t1).toFixed(2)+'</span></div></div><div><span class="pill '+(status==='skipped'?'skip':status==='error'?'err':'')+'">'+status+'</span><div class="meta">'+(detail||'')+'</div></div></div>'+feed.innerHTML.replace('<div class="empty">Waiting for Telegram alerts...</div>','');}
+function renderLogs(logs){document.getElementById('orderCount').textContent=logs.length+' logs';const body=document.getElementById('tradeLog');const orders=document.getElementById('orders');if(!logs.length){body.innerHTML='<tr><td colspan="5" class="empty">No trades yet</td></tr>';orders.innerHTML='<div class="empty">No orders yet</div>';return;}body.innerHTML=logs.map(l=>'<tr><td>'+(l.logged_at||l.created_at||'').slice(11,19)+'</td><td>'+(l.ticker||l.alert?.ticker||'-')+'</td><td>'+(l.source||l.type||'-')+'</td><td class="'+(l.status==='submitted'?'log-ok':l.status==='skipped'?'log-skip':l.status==='error'?'log-err':'log-open')+'">'+(l.status||'-')+'</td><td>'+(l.reason||l.message||l.alpaca_order_id||'')+'</td></tr>').join('');orders.innerHTML=logs.slice(0,6).map(l=>'<div class="pos-item"><div class="badge-grade">'+((l.alert?.grade)||'--')+'</div><div><div class="ticker">'+(l.ticker||l.alert?.ticker||l.type||'-')+'</div><div class="meta">'+(l.reason||l.message||l.alpaca_order_id||l.source||'')+'</div></div><span class="pill '+(l.status==='skipped'?'skip':l.status==='error'?'err':'')+'">'+(l.status||'log')+'</span></div>').join('');}
 function requireConnected(){
   if(state.clientId&&state.clientToken)return true;
-  show('Connect Alpaca paper first with Save / Connect. Then Auto ON/OFF, Pause Today, Test Alpaca, and manual paper orders will work.');
+  show('Open settings and connect Alpaca paper first.','warn');openSettings();
   return false;
 }
 const originalSaveSettings=saveSettings;
@@ -798,7 +821,7 @@ const originalManualTrade=manualTrade;
 manualTrade=async function(){if(!requireConnected())return;return originalManualTrade();}
 const originalLoadLogs=loadLogs;
 loadLogs=async function(){if(!requireConnected())return;return originalLoadLogs();}
-health();loadMe().catch(()=>show('Connect Alpaca paper first.'));
+health();loadMe().then(()=>{if(state.clientId)loadLogs();}).catch(()=>show('Open settings and connect Alpaca paper first.'));
 </script>
 </body>
 </html>`;
