@@ -40,6 +40,16 @@ export default {
         return corsJson({ ok: true, telegram: await getTelegramWebhookInfo(env) });
       }
 
+      if (request.method === "GET" && url.pathname === "/debug/clients") {
+        requireStorage(env);
+        const clients = await listClients(env);
+        const details = [];
+        for (const client of clients) {
+          details.push({ ...publicClient(client), day: await getDayStats(env, client.id) });
+        }
+        return corsJson({ ok: true, clients: details });
+      }
+
       if (request.method === "POST" && url.pathname === "/test") {
         const { text } = await readAlertPayload(request);
         const alert = parseKalkiAlert(text);
@@ -69,6 +79,10 @@ export default {
 
       if (request.method === "POST" && url.pathname === "/api/client/logs") {
         return await handleClientLogs(request, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/client/delete") {
+        return await handleDeleteClient(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/control") {
@@ -190,6 +204,12 @@ async function handleClientLogs(request, env) {
   const { client } = await requireClientAuth(request, env);
   const logs = await listClientLogs(env, client.id, 50);
   return corsJson({ ok: true, logs });
+}
+
+async function handleDeleteClient(request, env) {
+  const { client } = await requireClientAuth(request, env);
+  await deleteClient(env, client.id);
+  return corsJson({ ok: true, deleted_client_id: client.id });
 }
 
 async function handleTelegramWebhook(request, env) {
@@ -444,6 +464,10 @@ async function getClient(env, id) {
 
 async function saveClient(env, client) {
   await env.AUTOTRADER_KV.put(`client:${client.id}`, JSON.stringify(client));
+}
+
+async function deleteClient(env, id) {
+  await env.AUTOTRADER_KV.delete(`client:${id}`);
 }
 
 async function listClients(env) {
@@ -802,7 +826,7 @@ function renderDashboard() {
       <div class="field full row"><button class="good" onclick="setEnabled(true)">Auto ON</button><button class="danger" onclick="setEnabled(false)">Auto OFF</button><button onclick="pauseToday()">Pause Today</button><button onclick="clearPause()">Clear Pause</button></div>
       <div class="field full hint">Clients connect their own Alpaca paper account here. Credentials are encrypted in Cloudflare KV so automatic Telegram alerts can trade even when this browser is closed.</div>
     </div>
-    <div class="modal-actions"><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testAlpaca()">Test Alpaca</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
+    <div class="modal-actions"><button class="danger" onclick="deleteProfile()">Delete Profile</button><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testAlpaca()">Test Alpaca</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
   </div>
 </div>
 <div id="toast"></div>
@@ -868,6 +892,7 @@ async function previewAlert(){const r=await fetch('/test',{method:'POST',headers
 async function manualTrade(){if(!confirm('Place this Alpaca paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
 async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();if(!data.ok){show(data);return;}renderLogs(data.logs||[]);}
 function forgetClient(){localStorage.removeItem('kalkiClientId');localStorage.removeItem('kalkiClientToken');location.reload();}
+async function deleteProfile(){if(!requireConnected())return;if(!confirm('Delete this client profile from auto-trading?'))return;const r=await fetch('/api/client/delete',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)forgetClient();}
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
 function closeSettings(event){if(event&&event.target.id!=='settingsModal')return;document.getElementById('settingsModal').classList.remove('open');}
 function addAlert(alert,status,detail){const feed=document.getElementById('alertFeed');feed.innerHTML='<div class="alert-item"><div class="badge-grade">'+(alert.grade||'?')+'</div><div><div class="ticker">'+alert.ticker+'</div><div class="prices"><span class="entry">Entry $'+Number(alert.entryPrice).toFixed(2)+'</span><span class="stop">Stop $'+Number(alert.stopPrice).toFixed(2)+'</span><span class="target">T1 $'+Number(alert.t1).toFixed(2)+'</span></div></div><div><span class="pill '+(status==='skipped'?'skip':status==='error'?'err':'')+'">'+status+'</span><div class="meta">'+(detail||'')+'</div></div></div>'+feed.innerHTML.replace('<div class="empty">Waiting for Telegram alerts...</div>','');}
