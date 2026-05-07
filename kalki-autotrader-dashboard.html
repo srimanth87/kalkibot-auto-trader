@@ -746,7 +746,7 @@
   <div class="config-panel">
     <div class="config-group">
       <label>Alpaca Worker Webhook URL</label>
-      <input type="text" id="cfg-worker" placeholder="http://127.0.0.1:8787/telegram/kalki2026" />
+      <input type="text" id="cfg-worker" placeholder="https://kalki-alpaca-autotrader.your-subdomain.workers.dev/telegram/kalki2026" />
     </div>
     <div class="config-group">
       <label>Position Size ($)</label>
@@ -1100,7 +1100,7 @@ async function placeAlpacaOrder() {
 
   const workerBase = getWorkerBaseUrl();
   if (!workerBase) {
-    toast('Enter the Worker URL first, e.g. http://127.0.0.1:8787/telegram/kalki2026', 'warn');
+    toast('Enter your deployed Cloudflare Worker URL first', 'warn');
     return;
   }
 
