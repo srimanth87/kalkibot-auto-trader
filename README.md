@@ -9,7 +9,8 @@ Standalone Cloudflare Worker project for Kalki alerts and Alpaca bracket orders.
 - Shares are `floor(1000 / entry price)`.
 - Submit a buy limit order at entry.
 - Attach a bracket with sell limit at T1 and stop loss at the stop price.
-- Uses your Alpaca endpoint, key ID, and secret key through environment variables.
+- Dashboard users connect their own Alpaca paper account from the settings modal.
+- Optional server-side Alpaca secrets can be used for fully automated Telegram trading under one shared account.
 
 ## Setup
 
@@ -21,12 +22,14 @@ cp .dev.vars.example .dev.vars
 
 Put your real values in `.dev.vars`. Do not commit `.dev.vars`.
 
-Cloudflare secrets:
+Optional Cloudflare Alpaca secrets for server-side Telegram auto-trading:
 
 ```bash
 wrangler secret put ALPACA_KEY_ID
 wrangler secret put ALPACA_SECRET_KEY
 ```
+
+Do not set these to your personal keys if this Worker is intended for other people to use with their own paper accounts. The dashboard supports bring-your-own credentials and sends them per request.
 
 Telegram source channel/group:
 
@@ -66,3 +69,5 @@ curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://kalki-
 ## Alpaca Notes
 
 The default endpoint is paper trading: `https://paper-api.alpaca.markets`.
+
+For the hosted dashboard, each user should click the settings gear and enter their own Alpaca paper endpoint, key id, and secret. Those values are stored only in that user's browser localStorage.
