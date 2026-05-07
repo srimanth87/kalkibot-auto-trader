@@ -1,0 +1,8 @@
+ALPACA_BASE_URL=https://api.alpaca.markets
+ALPACA_KEY_ID=replace-with-your-alpaca-key-id
+ALPACA_SECRET_KEY=replace-with-your-alpaca-secret-key
+SECRET_PATH=kalki2026
+POSITION_SIZE=1000
+MIN_GRADE=B
+TELEGRAM_BOT_TOKEN=optional-telegram-bot-token
+TELEGRAM_CHAT_ID=optional-chat-id
