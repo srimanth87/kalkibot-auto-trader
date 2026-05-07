@@ -4,7 +4,7 @@
   "main": "src/index.js",
   "compatibility_date": "2026-05-06",
   "vars": {
-    "ALPACA_BASE_URL": "https://api.alpaca.markets",
+    "ALPACA_BASE_URL": "https://paper-api.alpaca.markets",
     "SECRET_PATH": "kalki2026",
     "POSITION_SIZE": "1000",
     "MIN_GRADE": "B"
