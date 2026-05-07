@@ -865,15 +865,15 @@ function renderDashboard() {
     <div class="modal-head"><div class="modal-title">Settings</div><button onclick="closeSettings()">×</button></div>
     <div class="modal-body">
       <div><label>Name</label><input id="name" placeholder="Client name"></div>
-      <div><label>Endpoint</label><input id="endpoint" value="https://paper-api.alpaca.markets/v2"></div>
-      <div><label>API Key ID</label><input id="key" autocomplete="off"></div>
-      <div><label>API Secret Key</label><input id="secret" type="password" autocomplete="off"></div>
+      <div><label>Endpoint Base URL</label><input id="endpoint" value="https://paper-api.alpaca.markets"></div>
+      <div><label>API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
+      <div><label>API Secret Key</label><input id="secret" type="password" autocomplete="off" placeholder="saved - leave blank to keep"></div>
       <div><label>Min Grade</label><select id="minGrade"><option>A</option><option selected>B</option><option>C</option></select></div>
       <div><label>Position Size ($)</label><input id="positionSize" type="number" value="1000"></div>
       <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
       <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
       <div class="field full row"><button onclick="pauseToday()">Pause Today</button><button onclick="clearPause()">Clear Pause</button></div>
-      <div class="field full hint">Clients connect their own Alpaca paper account here. Credentials are encrypted in Cloudflare KV so automatic Telegram alerts can trade even when this browser is closed.</div>
+      <div class="field full hint">Clients connect their own Alpaca paper account here. Credentials are encrypted in Cloudflare KV and are not shown again after saving. Leave key fields blank to keep the saved credentials.</div>
     </div>
     <div class="modal-actions"><button class="danger" onclick="deleteProfile()">Delete Profile</button><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testAlpaca()">Test Alpaca</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
   </div>
@@ -910,7 +910,7 @@ function applyClient(data){
   document.getElementById('dayNotional').textContent='$'+Number(data.day?.notional||0).toFixed(2);
   document.getElementById('gradeStat').textContent=c.minGrade||'B';
   document.getElementById('name').value=c.name||'';
-  document.getElementById('endpoint').value=c.endpoint||'https://paper-api.alpaca.markets/v2';
+  document.getElementById('endpoint').value=c.endpoint||'https://paper-api.alpaca.markets';
   document.getElementById('minGrade').value=c.minGrade||'B';
   document.getElementById('positionSize').value=c.positionSize||1000;
   document.getElementById('maxTradesPerDay').value=c.maxTradesPerDay||'';
