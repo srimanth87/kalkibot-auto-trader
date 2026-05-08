@@ -1,4 +1,5 @@
 const DEFAULT_ALPACA_BASE_URL = "https://paper-api.alpaca.markets";
+const DEFAULT_TRADIER_BASE_URL = "https://sandbox.tradier.com";
 const DEFAULT_POSITION_SIZE = 1000;
 const DEFAULT_MIN_GRADE = "B";
 const GRADE_RANK = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-"];
@@ -23,7 +24,12 @@ export default {
           service: "kalki-alpaca-autotrader",
           mode: "multi-client-paper",
           enabled: await isTradingEnabled(env),
+          brokers: [
+            { id: alpacaBrokerAdapter.id, label: alpacaBrokerAdapter.label, default_endpoint: DEFAULT_ALPACA_BASE_URL },
+            { id: tradierBrokerAdapter.id, label: tradierBrokerAdapter.label, default_endpoint: DEFAULT_TRADIER_BASE_URL },
+          ],
           alpaca_base_url: getAlpacaBaseUrl(env),
+          tradier_base_url: DEFAULT_TRADIER_BASE_URL,
           webhook_path: `/telegram/${getSecretPath(env)}`,
           source_chat_id: getSourceChatId(env) || null,
           has_telegram_bot_token: Boolean(env.TELEGRAM_BOT_TOKEN),
@@ -73,8 +79,8 @@ export default {
         return await handleUpdateClient(request, env);
       }
 
-      if (request.method === "POST" && url.pathname === "/api/client/test-alpaca") {
-        return await handleClientAlpacaTest(request, env);
+      if (request.method === "POST" && (url.pathname === "/api/client/test-broker" || url.pathname === "/api/client/test-alpaca")) {
+        return await handleClientBrokerTest(request, env);
       }
 
       if (request.method === "POST" && url.pathname === "/api/client/manual-trade") {
@@ -113,20 +119,21 @@ async function handleRegisterClient(request, env) {
   requireStorage(env);
   requireEncryption(env);
   const body = await request.json().catch(() => ({}));
-  const endpoint = normalizeAlpacaEndpoint(body.endpoint || DEFAULT_ALPACA_BASE_URL);
-  const key = String(body.key || "").trim();
-  const secret = String(body.secret || "").trim();
-  if (!key || !secret) return corsJson({ ok: false, error: "Alpaca paper key and secret are required" }, 400);
+  const broker = normalizeBroker(body.broker);
+  const adapter = getBrokerAdapter(broker);
+  const endpoint = adapter.normalizeEndpoint(body.endpoint);
+  const credentials = adapter.credentialsFromBody(body);
 
-  const account = await getAlpacaAccount({ endpoint, key, secret });
+  const account = await adapter.getAccount({ endpoint, ...credentials });
   const token = makeToken();
   const accessCode = makeAccessCode();
-  const duplicate = await findClientByAlpacaAccount(env, account.id);
+  const duplicate = await findClientByBrokerAccount(env, broker, account.id);
   if (duplicate) {
     duplicate.name = String(body.name || duplicate.name || account.id || "Client").trim().slice(0, 80);
+    duplicate.broker = broker;
     duplicate.accountId = account.id;
     duplicate.endpoint = endpoint;
-    duplicate.credentials = await encryptJson(env, { key, secret });
+    duplicate.credentials = await encryptJson(env, credentials);
     addClientSession(duplicate, await sha256Hex(token));
     duplicate.accessCodeHash = await sha256Hex(normalizeAccessCode(accessCode));
     duplicate.enabled = typeof body.enabled === "boolean" ? body.enabled : duplicate.enabled;
@@ -147,9 +154,10 @@ async function handleRegisterClient(request, env) {
   const client = {
     id: crypto.randomUUID(),
     name: String(body.name || account.id || "Client").trim().slice(0, 80),
+    broker,
     accountId: account.id,
     endpoint,
-    credentials: await encryptJson(env, { key, secret }),
+    credentials: await encryptJson(env, credentials),
     tokenHash: await sha256Hex(token),
     tokenHashes: [await sha256Hex(token)],
     accessCodeHash: await sha256Hex(normalizeAccessCode(accessCode)),
@@ -213,17 +221,18 @@ async function handleUpdateClient(request, env) {
   if (body.pauseToday === true) client.pauseUntil = endOfTodayIso();
   if (body.pauseToday === false || body.clearPause === true) client.pauseUntil = null;
 
-  if (body.endpoint || body.key || body.secret) {
+  if (body.broker || body.endpoint || body.key || body.secret) {
     requireEncryption(env);
-    const existing = await decryptCredentials(env, client);
-    const endpoint = normalizeAlpacaEndpoint(body.endpoint || client.endpoint || DEFAULT_ALPACA_BASE_URL);
-    const key = String(body.key || existing.key || "").trim();
-    const secret = String(body.secret || existing.secret || "").trim();
-    if (!key || !secret) return corsJson({ ok: false, error: "Alpaca paper key and secret are required" }, 400);
-    const account = await getAlpacaAccount({ endpoint, key, secret });
+    const broker = normalizeBroker(body.broker || client.broker);
+    const adapter = getBrokerAdapter(broker);
+    const existing = await decryptCredentials(env, client).catch(() => ({}));
+    const endpoint = adapter.normalizeEndpoint(body.endpoint || client.endpoint);
+    const credentials = adapter.credentialsFromBody(body, existing);
+    const account = await adapter.getAccount({ endpoint, ...credentials });
+    client.broker = broker;
     client.accountId = account.id;
     client.endpoint = endpoint;
-    client.credentials = await encryptJson(env, { key, secret });
+    client.credentials = await encryptJson(env, credentials);
     client.name = client.name || account.id || "Client";
   }
 
@@ -237,11 +246,12 @@ async function handleUpdateClient(request, env) {
   return corsJson({ ok: true, client: publicClient(client), day: await getDayStats(env, client.id) });
 }
 
-async function handleClientAlpacaTest(request, env) {
+async function handleClientBrokerTest(request, env) {
   const { client } = await requireClientAuth(request, env);
   const credentials = await decryptCredentials(env, client);
-  const account = await getAlpacaAccount({ endpoint: client.endpoint, ...credentials });
-  return corsJson({ ok: true, account });
+  const broker = getBrokerAdapter(client.broker);
+  const account = await broker.getAccount({ endpoint: client.endpoint, ...credentials });
+  return corsJson({ ok: true, broker: broker.id, account });
 }
 
 async function handleClientManualTrade(request, env) {
@@ -345,7 +355,8 @@ async function maybeTradeForClient(env, client, alert, context = {}) {
     }
 
     const credentials = await decryptCredentials(env, client);
-    const alpacaOrder = await placeAlpacaBracketOrder(env, alert, decision.shares, {
+    const broker = getBrokerAdapter(client.broker);
+    const brokerOrder = await broker.placeBracketOrder(env, alert, decision.shares, {
       endpoint: client.endpoint,
       ...credentials,
     });
@@ -360,8 +371,11 @@ async function maybeTradeForClient(env, client, alert, context = {}) {
       status: "submitted",
       decision,
       alert,
-      alpaca_order_id: alpacaOrder.id || alpacaOrder.client_order_id || null,
-      alpaca_order: alpacaOrder,
+      broker: broker.id,
+      broker_order_id: broker.extractOrderId(brokerOrder),
+      broker_order: brokerOrder,
+      alpaca_order_id: broker.id === "alpaca" ? broker.extractOrderId(brokerOrder) : null,
+      alpaca_order: broker.id === "alpaca" ? brokerOrder : null,
     };
     await writeClientLog(env, client.id, result);
     return result;
@@ -441,6 +455,58 @@ function buildTradeDecision(client, alert) {
   return { tradeable: true, reason: "accepted", shares, position_size: positionSize };
 }
 
+function getBrokerAdapter(value) {
+  const broker = normalizeBroker(value);
+  if (broker === "tradier") return tradierBrokerAdapter;
+  return alpacaBrokerAdapter;
+}
+
+const alpacaBrokerAdapter = {
+  id: "alpaca",
+  label: "Alpaca Paper",
+  normalizeEndpoint(value) {
+    return normalizeAlpacaEndpoint(value || DEFAULT_ALPACA_BASE_URL);
+  },
+  credentialsFromBody(body, existing = {}) {
+    const key = String(body.key || existing.key || "").trim();
+    const secret = String(body.secret || existing.secret || "").trim();
+    if (!key || !secret) throw new Error("Alpaca key id and secret key are required");
+    return { key, secret };
+  },
+  async getAccount({ endpoint, key, secret }) {
+    return await getAlpacaAccount({ endpoint, key, secret });
+  },
+  async placeBracketOrder(env, alert, shares, credentials) {
+    return await placeAlpacaBracketOrder(env, alert, shares, credentials);
+  },
+  extractOrderId(order) {
+    return order?.id || order?.client_order_id || null;
+  },
+};
+
+const tradierBrokerAdapter = {
+  id: "tradier",
+  label: "Tradier Paper",
+  normalizeEndpoint(value) {
+    return normalizeTradierEndpoint(value || DEFAULT_TRADIER_BASE_URL);
+  },
+  credentialsFromBody(body, existing = {}) {
+    const accountId = String(body.key || body.accountId || existing.accountId || "").trim();
+    const token = String(body.secret || body.token || existing.token || "").trim();
+    if (!accountId || !token) throw new Error("Tradier account id and access token are required");
+    return { accountId, token };
+  },
+  async getAccount({ endpoint, accountId, token }) {
+    return await getTradierAccount({ endpoint, accountId, token });
+  },
+  async placeBracketOrder(env, alert, shares, credentials) {
+    return await placeTradierBracketOrder(env, alert, shares, credentials);
+  },
+  extractOrderId(order) {
+    return order?.order?.id || order?.id || null;
+  },
+};
+
 async function placeAlpacaBracketOrder(env, alert, shares, overrides = {}) {
   const endpoint = normalizeAlpacaEndpoint(overrides.endpoint || getAlpacaBaseUrl(env));
   const key = overrides.key || env.ALPACA_KEY_ID;
@@ -474,6 +540,44 @@ async function placeAlpacaBracketOrder(env, alert, shares, overrides = {}) {
   return data;
 }
 
+async function placeTradierBracketOrder(env, alert, shares, overrides = {}) {
+  const endpoint = normalizeTradierEndpoint(overrides.endpoint || DEFAULT_TRADIER_BASE_URL);
+  const accountId = overrides.accountId;
+  const token = overrides.token;
+  if (!endpoint || !accountId || !token) throw new Error("Tradier endpoint, account id, and token are required");
+
+  const body = new URLSearchParams({
+    class: "otoco",
+    duration: "day",
+    "symbol[0]": alert.ticker,
+    "side[0]": "buy",
+    "quantity[0]": String(shares),
+    "type[0]": "limit",
+    "price[0]": toMoney(alert.entryPrice),
+    "symbol[1]": alert.ticker,
+    "side[1]": "sell",
+    "quantity[1]": String(shares),
+    "type[1]": "limit",
+    "price[1]": toMoney(alert.t1),
+    "symbol[2]": alert.ticker,
+    "side[2]": "sell",
+    "quantity[2]": String(shares),
+    "type[2]": "stop",
+    "stop[2]": toMoney(alert.stopPrice),
+    tag: buildClientOrderId(alert.ticker),
+  });
+
+  const response = await fetch(`${endpoint}/v1/accounts/${encodeURIComponent(accountId)}/orders`, {
+    method: "POST",
+    headers: tradierHeaders(token, true),
+    body,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.errors?.error?.[0] || data?.errors?.error || data?.error || `Tradier order failed with HTTP ${response.status}`);
+  return data;
+}
+
 async function getAlpacaAccount({ endpoint, key, secret }) {
   if (!endpoint || !key || !secret) throw new Error("Alpaca endpoint, key, and secret are required");
   const response = await fetch(`${normalizeAlpacaEndpoint(endpoint)}/v2/account`, {
@@ -496,6 +600,35 @@ async function getAlpacaAccount({ endpoint, key, secret }) {
     trading_blocked: data.trading_blocked,
     account_blocked: data.account_blocked,
   };
+}
+
+async function getTradierAccount({ endpoint, accountId, token }) {
+  if (!endpoint || !accountId || !token) throw new Error("Tradier endpoint, account id, and token are required");
+  const response = await fetch(`${normalizeTradierEndpoint(endpoint)}/v1/accounts/${encodeURIComponent(accountId)}/balances`, {
+    method: "GET",
+    headers: tradierHeaders(token),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.errors?.error?.[0] || data?.errors?.error || data?.error || `Tradier account request failed with HTTP ${response.status}`);
+  const balances = data.balances || {};
+  return {
+    id: accountId,
+    status: "ok",
+    currency: "USD",
+    buying_power: balances.stock_buying_power || balances.option_buying_power || balances.total_cash || null,
+    portfolio_value: balances.total_equity || null,
+    raw: balances,
+  };
+}
+
+function tradierHeaders(token, form = false) {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+  };
+  if (form) headers["Content-Type"] = "application/x-www-form-urlencoded";
+  return headers;
 }
 
 async function requireClientAuth(request, env) {
@@ -537,15 +670,18 @@ async function listClients(env) {
   return clients;
 }
 
-async function findClientByAlpacaAccount(env, accountId) {
+async function findClientByBrokerAccount(env, broker, accountId) {
   if (!accountId) return null;
+  const normalizedBroker = normalizeBroker(broker);
   const clients = await listClients(env);
   for (const client of clients) {
-    if (client.accountId === accountId) return client;
+    if (normalizeBroker(client.broker) === normalizedBroker && client.accountId === accountId) return client;
   }
 
+  if (normalizedBroker !== "alpaca") return null;
   for (const client of clients) {
     try {
+      if (normalizeBroker(client.broker) !== "alpaca") continue;
       const credentials = await decryptCredentials(env, client);
       const account = await getAlpacaAccount({ endpoint: client.endpoint, ...credentials });
       if (account.id === accountId) {
@@ -579,6 +715,8 @@ function publicClient(client) {
   return {
     id: client.id,
     name: client.name,
+    broker: normalizeBroker(client.broker),
+    brokerLabel: getBrokerAdapter(client.broker).label,
     accountId: client.accountId || null,
     endpoint: client.endpoint,
     enabled: client.enabled,
@@ -743,6 +881,14 @@ function getAlpacaBaseUrl(env) {
 
 function normalizeAlpacaEndpoint(value) {
   return String(value || "").trim().replace(/\/+$/, "").replace(/\/v2$/i, "");
+}
+
+function normalizeTradierEndpoint(value) {
+  return String(value || "").trim().replace(/\/+$/, "").replace(/\/v1$/i, "");
+}
+
+function normalizeBroker(value) {
+  return String(value || "alpaca").trim().toLowerCase() === "tradier" ? "tradier" : "alpaca";
 }
 
 function normalizeMinGrade(value) {
@@ -932,18 +1078,19 @@ function renderDashboard() {
     <div class="modal-body">
       <div class="field full"><label>Client Access Code</label><div class="restore-row"><input id="accessCodeInput" placeholder="KALKI-XXXX-XXXX-XXXX" autocomplete="off"><button onclick="restoreClient()">Restore</button></div></div>
       <div class="field full access-code" id="newAccessCode"></div>
+      <div><label>Broker</label><select id="broker" onchange="brokerChanged()"><option value="alpaca" selected>Alpaca Paper</option><option value="tradier">Tradier Paper</option></select></div>
       <div><label>Name</label><input id="name" placeholder="Client name"></div>
       <div><label>Endpoint Base URL</label><input id="endpoint" value="https://paper-api.alpaca.markets"></div>
-      <div><label>API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
-      <div><label>API Secret Key</label><input id="secret" type="password" autocomplete="off" placeholder="saved - leave blank to keep"></div>
+      <div><label id="keyLabel">API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
+      <div><label id="secretLabel">API Secret Key</label><input id="secret" type="password" autocomplete="off" placeholder="saved - leave blank to keep"></div>
       <div><label>Min Grade</label><select id="minGrade"><option>A</option><option selected>B</option><option>C</option></select></div>
       <div><label>Position Size ($)</label><input id="positionSize" type="number" value="1000"></div>
       <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
       <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
       <div class="field full row"><button onclick="pauseToday()">Pause Today</button><button onclick="clearPause()">Clear Pause</button></div>
-      <div class="field full hint">Use Client Access Code to restore this profile from another browser. After Save / Connect, save the generated code somewhere safe. Alpaca credentials are encrypted in Cloudflare KV and are not shown again after saving.</div>
+      <div class="field full hint">Use Client Access Code to restore this profile from another browser. After Save / Connect, save the generated code somewhere safe. Broker credentials are encrypted in Cloudflare KV and are not shown again after saving.</div>
     </div>
-    <div class="modal-actions"><button class="danger" onclick="deleteProfile()">Delete Profile</button><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testAlpaca()">Test Alpaca</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
+    <div class="modal-actions"><button class="danger" onclick="deleteProfile()">Delete Profile</button><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testBroker()">Test Broker</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
   </div>
 </div>
 <div id="toast"></div>
@@ -966,7 +1113,20 @@ function showAccessCode(code){
   el.className='field full access-code show';
   el.textContent='Save this access code: '+code;
 }
+function brokerDefaults(broker){
+  return broker==='tradier'
+    ? {endpoint:'https://sandbox.tradier.com',keyLabel:'Tradier Account ID',secretLabel:'Tradier Access Token'}
+    : {endpoint:'https://paper-api.alpaca.markets',keyLabel:'API Key ID',secretLabel:'API Secret Key'};
+}
+function brokerChanged(){
+  const broker=document.getElementById('broker').value;
+  const defaults=brokerDefaults(broker);
+  document.getElementById('keyLabel').textContent=defaults.keyLabel;
+  document.getElementById('secretLabel').textContent=defaults.secretLabel;
+  if(!document.getElementById('endpoint').value)document.getElementById('endpoint').value=defaults.endpoint;
+}
 function formSettings(){return {
+  broker: document.getElementById('broker').value,
   name: document.getElementById('name').value,
   endpoint: document.getElementById('endpoint').value,
   key: document.getElementById('key').value,
@@ -987,16 +1147,18 @@ function applyClient(data){
   document.getElementById('dayTrades').textContent=data.day?.tradeCount ?? '--';
   document.getElementById('dayNotional').textContent='$'+Number(data.day?.notional||0).toFixed(2);
   document.getElementById('gradeStat').textContent=c.minGrade||'B';
+  document.getElementById('broker').value=c.broker||'alpaca';
+  brokerChanged();
   document.getElementById('name').value=c.name||'';
-  document.getElementById('endpoint').value=c.endpoint||'https://paper-api.alpaca.markets';
+  document.getElementById('endpoint').value=c.endpoint||brokerDefaults(c.broker||'alpaca').endpoint;
   document.getElementById('minGrade').value=c.minGrade||'B';
   document.getElementById('positionSize').value=c.positionSize||1000;
   document.getElementById('maxTradesPerDay').value=c.maxTradesPerDay||'';
   document.getElementById('maxDollarsPerDay').value=c.maxDollarsPerDay||'';
 }
 async function health(){
-  const r=await fetch('/health');const data=await r.json();
-  document.getElementById('mode').textContent=data.kv_bound?'Alpaca Paper':'KV Missing';
+  const r=await fetch('/api/health');const data=await r.json();
+  document.getElementById('mode').textContent=data.kv_bound?'Broker Paper':'KV Missing';
 }
 async function registerClient(){
   const r=await fetch('/api/client/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formSettings())});
@@ -1022,9 +1184,9 @@ async function setEnabled(enabled){await saveSettings({enabled});}
 async function toggleBot(){if(!requireConnected())return;const isOn=!document.getElementById('botToggle').classList.contains('off');await setEnabled(!isOn);}
 async function pauseToday(){await saveSettings({pauseToday:true});}
 async function clearPause(){await saveSettings({clearPause:true});}
-async function testAlpaca(){const r=await fetch('/api/client/test-alpaca',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
-async function previewAlert(){const r=await fetch('/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.ok)addAlert(data.alert,'preview',data.decision?.reason||'Preview');}
-async function manualTrade(){if(!confirm('Place this Alpaca paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
+async function testBroker(){const r=await fetch('/api/client/test-broker',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
+async function previewAlert(){const r=await fetch('/api/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.ok)addAlert(data.alert,'preview',data.decision?.reason||'Preview');}
+async function manualTrade(){if(!confirm('Place this paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
 async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();if(!data.ok){show(data);return;}renderLogs(data.logs||[]);}
 function forgetClient(){localStorage.removeItem('kalkiClientId');localStorage.removeItem('kalkiClientToken');location.reload();}
 async function deleteProfile(){if(!requireConnected())return;if(!confirm('Delete this client profile from auto-trading?'))return;const r=await fetch('/api/client/delete',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)forgetClient();}
@@ -1032,21 +1194,22 @@ function openSettings(){document.getElementById('settingsModal').classList.add('
 function closeSettings(event){if(event&&event.target.id!=='settingsModal')return;document.getElementById('settingsModal').classList.remove('open');}
 function addAlert(alert,status,detail){const feed=document.getElementById('alertFeed');feed.innerHTML='<div class="alert-item"><div class="badge-grade">'+(alert.grade||'?')+'</div><div><div class="ticker">'+alert.ticker+'</div><div class="prices"><span class="entry">Entry $'+Number(alert.entryPrice).toFixed(2)+'</span><span class="stop">Stop $'+Number(alert.stopPrice).toFixed(2)+'</span><span class="target">T1 $'+Number(alert.t1).toFixed(2)+'</span></div></div><div><span class="pill '+(status==='skipped'?'skip':status==='error'?'err':'')+'">'+status+'</span><div class="meta">'+(detail||'')+'</div></div></div>'+feed.innerHTML.replace('<div class="empty">Waiting for Telegram alerts...</div>','');}
 function formatEtTime(value){if(!value)return '-';const date=new Date(value);if(Number.isNaN(date.getTime()))return '-';return new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true,timeZoneName:'short'}).format(date);}
-function renderLogs(logs){document.getElementById('orderCount').textContent=logs.length+' logs';const body=document.getElementById('tradeLog');const orders=document.getElementById('orders');if(!logs.length){body.innerHTML='<tr><td colspan="5" class="empty">No trades yet</td></tr>';orders.innerHTML='<div class="empty">No orders yet</div>';return;}body.innerHTML=logs.map(l=>'<tr><td>'+formatEtTime(l.logged_at||l.created_at)+'</td><td>'+(l.ticker||l.alert?.ticker||'-')+'</td><td>'+(l.source||l.type||'-')+'</td><td class="'+(l.status==='submitted'?'log-ok':l.status==='skipped'?'log-skip':l.status==='error'?'log-err':'log-open')+'">'+(l.status||'-')+'</td><td>'+(l.reason||l.message||l.alpaca_order_id||'')+'</td></tr>').join('');orders.innerHTML=logs.slice(0,6).map(l=>'<div class="pos-item"><div class="badge-grade">'+((l.alert?.grade)||'--')+'</div><div><div class="ticker">'+(l.ticker||l.alert?.ticker||l.type||'-')+'</div><div class="meta">'+(l.reason||l.message||l.alpaca_order_id||l.source||'')+'</div></div><span class="pill '+(l.status==='skipped'?'skip':l.status==='error'?'err':'')+'">'+(l.status||'log')+'</span></div>').join('');}
+function renderLogs(logs){document.getElementById('orderCount').textContent=logs.length+' logs';const body=document.getElementById('tradeLog');const orders=document.getElementById('orders');if(!logs.length){body.innerHTML='<tr><td colspan="5" class="empty">No trades yet</td></tr>';orders.innerHTML='<div class="empty">No orders yet</div>';return;}body.innerHTML=logs.map(l=>{const detail=l.reason||l.message||l.broker_order_id||l.alpaca_order_id||'';return '<tr><td>'+formatEtTime(l.logged_at||l.created_at)+'</td><td>'+(l.ticker||l.alert?.ticker||'-')+'</td><td>'+(l.broker||l.source||l.type||'-')+'</td><td class="'+(l.status==='submitted'?'log-ok':l.status==='skipped'?'log-skip':l.status==='error'?'log-err':'log-open')+'">'+(l.status||'-')+'</td><td>'+detail+'</td></tr>';}).join('');orders.innerHTML=logs.slice(0,6).map(l=>{const detail=l.reason||l.message||l.broker_order_id||l.alpaca_order_id||l.source||'';return '<div class="pos-item"><div class="badge-grade">'+((l.alert?.grade)||'--')+'</div><div><div class="ticker">'+(l.ticker||l.alert?.ticker||l.type||'-')+'</div><div class="meta">'+detail+'</div></div><span class="pill '+(l.status==='skipped'?'skip':l.status==='error'?'err':'')+'">'+(l.status||'log')+'</span></div>';}).join('');}
 function requireConnected(){
   if(state.clientId&&state.clientToken)return true;
-  show('Open settings and connect Alpaca paper first.','warn');openSettings();
+  show('Open settings and connect a paper broker first.','warn');openSettings();
   return false;
 }
 const originalSaveSettings=saveSettings;
 saveSettings=async function(extra={}){if(!requireConnected())return;return originalSaveSettings(extra);}
-const originalTestAlpaca=testAlpaca;
-testAlpaca=async function(){if(!requireConnected())return;return originalTestAlpaca();}
+const originalTestBroker=testBroker;
+testBroker=async function(){if(!requireConnected())return;return originalTestBroker();}
 const originalManualTrade=manualTrade;
 manualTrade=async function(){if(!requireConnected())return;return originalManualTrade();}
 const originalLoadLogs=loadLogs;
 loadLogs=async function(){if(!requireConnected())return;return originalLoadLogs();}
-health();loadMe().then(()=>{if(state.clientId)loadLogs();}).catch(()=>show('Open settings and connect Alpaca paper first.'));
+brokerChanged();
+health();loadMe().then(()=>{if(state.clientId)loadLogs();}).catch(()=>show('Open settings and connect a paper broker first.'));
 </script>
 </body>
 </html>`;

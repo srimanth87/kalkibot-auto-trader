@@ -70,18 +70,19 @@
     <div class="modal-body">
       <div class="field full"><label>Client Access Code</label><div class="restore-row"><input id="accessCodeInput" placeholder="KALKI-XXXX-XXXX-XXXX" autocomplete="off"><button onclick="restoreClient()">Restore</button></div></div>
       <div class="field full access-code" id="newAccessCode"></div>
+      <div><label>Broker</label><select id="broker" onchange="brokerChanged()"><option value="alpaca" selected>Alpaca Paper</option><option value="tradier">Tradier Paper</option></select></div>
       <div><label>Name</label><input id="name" placeholder="Client name"></div>
       <div><label>Endpoint Base URL</label><input id="endpoint" value="https://paper-api.alpaca.markets"></div>
-      <div><label>API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
-      <div><label>API Secret Key</label><input id="secret" type="password" autocomplete="off" placeholder="saved - leave blank to keep"></div>
+      <div><label id="keyLabel">API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
+      <div><label id="secretLabel">API Secret Key</label><input id="secret" type="password" autocomplete="off" placeholder="saved - leave blank to keep"></div>
       <div><label>Min Grade</label><select id="minGrade"><option>A</option><option selected>B</option><option>C</option></select></div>
       <div><label>Position Size ($)</label><input id="positionSize" type="number" value="1000"></div>
       <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
       <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
       <div class="field full row"><button onclick="pauseToday()">Pause Today</button><button onclick="clearPause()">Clear Pause</button></div>
-      <div class="field full hint">Use Client Access Code to restore this profile from another browser. After Save / Connect, save the generated code somewhere safe. Alpaca credentials are encrypted in Cloudflare KV and are not shown again after saving.</div>
+      <div class="field full hint">Use Client Access Code to restore this profile from another browser. After Save / Connect, save the generated code somewhere safe. Broker credentials are encrypted in Cloudflare KV and are not shown again after saving.</div>
     </div>
-    <div class="modal-actions"><button class="danger" onclick="deleteProfile()">Delete Profile</button><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testAlpaca()">Test Alpaca</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
+    <div class="modal-actions"><button class="danger" onclick="deleteProfile()">Delete Profile</button><button class="danger" onclick="forgetClient()">Forget Browser</button><button onclick="testBroker()">Test Broker</button><button onclick="saveSettings()">Save Controls</button><button class="primary" onclick="registerClient()">Save / Connect</button></div>
   </div>
 </div>
 <div id="toast"></div>
@@ -104,7 +105,20 @@ function showAccessCode(code){
   el.className='field full access-code show';
   el.textContent='Save this access code: '+code;
 }
+function brokerDefaults(broker){
+  return broker==='tradier'
+    ? {endpoint:'https://sandbox.tradier.com',keyLabel:'Tradier Account ID',secretLabel:'Tradier Access Token'}
+    : {endpoint:'https://paper-api.alpaca.markets',keyLabel:'API Key ID',secretLabel:'API Secret Key'};
+}
+function brokerChanged(){
+  const broker=document.getElementById('broker').value;
+  const defaults=brokerDefaults(broker);
+  document.getElementById('keyLabel').textContent=defaults.keyLabel;
+  document.getElementById('secretLabel').textContent=defaults.secretLabel;
+  if(!document.getElementById('endpoint').value)document.getElementById('endpoint').value=defaults.endpoint;
+}
 function formSettings(){return {
+  broker: document.getElementById('broker').value,
   name: document.getElementById('name').value,
   endpoint: document.getElementById('endpoint').value,
   key: document.getElementById('key').value,
@@ -125,8 +139,10 @@ function applyClient(data){
   document.getElementById('dayTrades').textContent=data.day?.tradeCount ?? '--';
   document.getElementById('dayNotional').textContent='$'+Number(data.day?.notional||0).toFixed(2);
   document.getElementById('gradeStat').textContent=c.minGrade||'B';
+  document.getElementById('broker').value=c.broker||'alpaca';
+  brokerChanged();
   document.getElementById('name').value=c.name||'';
-  document.getElementById('endpoint').value=c.endpoint||'https://paper-api.alpaca.markets';
+  document.getElementById('endpoint').value=c.endpoint||brokerDefaults(c.broker||'alpaca').endpoint;
   document.getElementById('minGrade').value=c.minGrade||'B';
   document.getElementById('positionSize').value=c.positionSize||1000;
   document.getElementById('maxTradesPerDay').value=c.maxTradesPerDay||'';
@@ -134,7 +150,7 @@ function applyClient(data){
 }
 async function health(){
   const r=await fetch('/api/health');const data=await r.json();
-  document.getElementById('mode').textContent=data.kv_bound?'Alpaca Paper':'KV Missing';
+  document.getElementById('mode').textContent=data.kv_bound?'Broker Paper':'KV Missing';
 }
 async function registerClient(){
   const r=await fetch('/api/client/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formSettings())});
@@ -160,9 +176,9 @@ async function setEnabled(enabled){await saveSettings({enabled});}
 async function toggleBot(){if(!requireConnected())return;const isOn=!document.getElementById('botToggle').classList.contains('off');await setEnabled(!isOn);}
 async function pauseToday(){await saveSettings({pauseToday:true});}
 async function clearPause(){await saveSettings({clearPause:true});}
-async function testAlpaca(){const r=await fetch('/api/client/test-alpaca',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
+async function testBroker(){const r=await fetch('/api/client/test-broker',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
 async function previewAlert(){const r=await fetch('/api/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.ok)addAlert(data.alert,'preview',data.decision?.reason||'Preview');}
-async function manualTrade(){if(!confirm('Place this Alpaca paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
+async function manualTrade(){if(!confirm('Place this paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
 async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();if(!data.ok){show(data);return;}renderLogs(data.logs||[]);}
 function forgetClient(){localStorage.removeItem('kalkiClientId');localStorage.removeItem('kalkiClientToken');location.reload();}
 async function deleteProfile(){if(!requireConnected())return;if(!confirm('Delete this client profile from auto-trading?'))return;const r=await fetch('/api/client/delete',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)forgetClient();}
@@ -170,21 +186,22 @@ function openSettings(){document.getElementById('settingsModal').classList.add('
 function closeSettings(event){if(event&&event.target.id!=='settingsModal')return;document.getElementById('settingsModal').classList.remove('open');}
 function addAlert(alert,status,detail){const feed=document.getElementById('alertFeed');feed.innerHTML='<div class="alert-item"><div class="badge-grade">'+(alert.grade||'?')+'</div><div><div class="ticker">'+alert.ticker+'</div><div class="prices"><span class="entry">Entry $'+Number(alert.entryPrice).toFixed(2)+'</span><span class="stop">Stop $'+Number(alert.stopPrice).toFixed(2)+'</span><span class="target">T1 $'+Number(alert.t1).toFixed(2)+'</span></div></div><div><span class="pill '+(status==='skipped'?'skip':status==='error'?'err':'')+'">'+status+'</span><div class="meta">'+(detail||'')+'</div></div></div>'+feed.innerHTML.replace('<div class="empty">Waiting for Telegram alerts...</div>','');}
 function formatEtTime(value){if(!value)return '-';const date=new Date(value);if(Number.isNaN(date.getTime()))return '-';return new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true,timeZoneName:'short'}).format(date);}
-function renderLogs(logs){document.getElementById('orderCount').textContent=logs.length+' logs';const body=document.getElementById('tradeLog');const orders=document.getElementById('orders');if(!logs.length){body.innerHTML='<tr><td colspan="5" class="empty">No trades yet</td></tr>';orders.innerHTML='<div class="empty">No orders yet</div>';return;}body.innerHTML=logs.map(l=>'<tr><td>'+formatEtTime(l.logged_at||l.created_at)+'</td><td>'+(l.ticker||l.alert?.ticker||'-')+'</td><td>'+(l.source||l.type||'-')+'</td><td class="'+(l.status==='submitted'?'log-ok':l.status==='skipped'?'log-skip':l.status==='error'?'log-err':'log-open')+'">'+(l.status||'-')+'</td><td>'+(l.reason||l.message||l.alpaca_order_id||'')+'</td></tr>').join('');orders.innerHTML=logs.slice(0,6).map(l=>'<div class="pos-item"><div class="badge-grade">'+((l.alert?.grade)||'--')+'</div><div><div class="ticker">'+(l.ticker||l.alert?.ticker||l.type||'-')+'</div><div class="meta">'+(l.reason||l.message||l.alpaca_order_id||l.source||'')+'</div></div><span class="pill '+(l.status==='skipped'?'skip':l.status==='error'?'err':'')+'">'+(l.status||'log')+'</span></div>').join('');}
+function renderLogs(logs){document.getElementById('orderCount').textContent=logs.length+' logs';const body=document.getElementById('tradeLog');const orders=document.getElementById('orders');if(!logs.length){body.innerHTML='<tr><td colspan="5" class="empty">No trades yet</td></tr>';orders.innerHTML='<div class="empty">No orders yet</div>';return;}body.innerHTML=logs.map(l=>{const detail=l.reason||l.message||l.broker_order_id||l.alpaca_order_id||'';return '<tr><td>'+formatEtTime(l.logged_at||l.created_at)+'</td><td>'+(l.ticker||l.alert?.ticker||'-')+'</td><td>'+(l.broker||l.source||l.type||'-')+'</td><td class="'+(l.status==='submitted'?'log-ok':l.status==='skipped'?'log-skip':l.status==='error'?'log-err':'log-open')+'">'+(l.status||'-')+'</td><td>'+detail+'</td></tr>';}).join('');orders.innerHTML=logs.slice(0,6).map(l=>{const detail=l.reason||l.message||l.broker_order_id||l.alpaca_order_id||l.source||'';return '<div class="pos-item"><div class="badge-grade">'+((l.alert?.grade)||'--')+'</div><div><div class="ticker">'+(l.ticker||l.alert?.ticker||l.type||'-')+'</div><div class="meta">'+detail+'</div></div><span class="pill '+(l.status==='skipped'?'skip':l.status==='error'?'err':'')+'">'+(l.status||'log')+'</span></div>';}).join('');}
 function requireConnected(){
   if(state.clientId&&state.clientToken)return true;
-  show('Open settings and connect Alpaca paper first.','warn');openSettings();
+  show('Open settings and connect a paper broker first.','warn');openSettings();
   return false;
 }
 const originalSaveSettings=saveSettings;
 saveSettings=async function(extra={}){if(!requireConnected())return;return originalSaveSettings(extra);}
-const originalTestAlpaca=testAlpaca;
-testAlpaca=async function(){if(!requireConnected())return;return originalTestAlpaca();}
+const originalTestBroker=testBroker;
+testBroker=async function(){if(!requireConnected())return;return originalTestBroker();}
 const originalManualTrade=manualTrade;
 manualTrade=async function(){if(!requireConnected())return;return originalManualTrade();}
 const originalLoadLogs=loadLogs;
 loadLogs=async function(){if(!requireConnected())return;return originalLoadLogs();}
-health();loadMe().then(()=>{if(state.clientId)loadLogs();}).catch(()=>show('Open settings and connect Alpaca paper first.'));
+brokerChanged();
+health();loadMe().then(()=>{if(state.clientId)loadLogs();}).catch(()=>show('Open settings and connect a paper broker first.'));
 </script>
 </body>
 </html>
