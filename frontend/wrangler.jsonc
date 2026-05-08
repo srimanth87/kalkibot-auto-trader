@@ -1,0 +1,9 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "kalki-autotrader",
+  "compatibility_date": "2026-05-06",
+  "pages_build_output_dir": ".",
+  "vars": {
+    "AUTOTRADER_API_ORIGIN": "https://kalki-alpaca-autotrader.srimanthgada87.workers.dev"
+  }
+}

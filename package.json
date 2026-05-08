@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js"
+    "check": "node --check src/index.js && node --check 'frontend/functions/api/[[path]].js'",
+    "pages:dev": "wrangler pages dev frontend",
+    "pages:deploy": "wrangler pages deploy frontend"
   },
   "devDependencies": {
     "wrangler": "^4.13.2"

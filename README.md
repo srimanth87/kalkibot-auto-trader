@@ -1,8 +1,13 @@
 # Kalki Alpaca Auto-Trader
 
-Standalone Cloudflare Worker project for Kalki alerts and Alpaca bracket orders. This folder is intentionally separate from the older Kalki analysis pages.
+Standalone auto-trader project for Kalki alerts and Alpaca bracket orders. This folder is intentionally separate from the older Kalki analysis pages and from the existing Telegram forwarder.
 
-The hosted app is multi-client: you post alerts in one Telegram channel, and each client connects their own Alpaca paper account in the dashboard.
+The clean deployment has two pieces:
+
+- `frontend/`: Cloudflare Pages dashboard at a clean `pages.dev` URL.
+- `src/index.js`: Cloudflare Worker API for clients, encrypted credentials, Telegram, and Alpaca orders.
+
+The hosted app is multi-client: you post alerts in one Telegram channel with a dedicated auto-trader Telegram bot, and each client connects their own Alpaca paper account in the dashboard.
 
 ## Rules
 
@@ -55,17 +60,37 @@ npm run deploy -- --keep-vars
 
 Use `--keep-vars` if you set `SOURCE_CHAT_ID` or other variables in the Cloudflare dashboard, so a deploy does not overwrite dashboard-managed values.
 
-Register Telegram:
+## Pages Dashboard
+
+Deploy the dashboard separately from the Worker API:
 
 ```bash
-curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://kalki-alpaca-autotrader.srimanthgada87.workers.dev/telegram/kalki2026"
+npm run pages:deploy
+```
+
+Set this Cloudflare Pages variable:
+
+```text
+AUTOTRADER_API_ORIGIN=https://<auto-trader-worker>.workers.dev
+```
+
+The dashboard calls `/api/...`; the Pages Function in `frontend/functions/api/[[path]].js` forwards those calls to the Worker API.
+
+## Telegram Bot
+
+Use a separate Telegram bot for auto-trading. Do not reuse the bot that powers the existing Telegram forwarder.
+
+Register the auto-trader bot webhook:
+
+```bash
+curl "https://api.telegram.org/bot<NEW_AUTO_TRADER_BOT_TOKEN>/setWebhook?url=https://<auto-trader-worker>.workers.dev/telegram/kalki2026"
 ```
 
 ## Endpoints
 
-- `GET /`: hosted client dashboard.
-- `GET /health`: config and status summary.
-- `POST /test`: parse and preview an alert without placing an order.
+- `GET /`: fallback Worker-hosted dashboard.
+- `GET /health` and `GET /api/health`: config and status summary.
+- `POST /test` and `POST /api/test`: parse and preview an alert without placing an order.
 - `POST /api/client/register`: create a client profile with encrypted Alpaca paper credentials.
 - `POST /api/client/settings`: update client pause/risk controls.
 - `POST /api/client/manual-trade`: manually place a paper trade for the authenticated client.

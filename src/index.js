@@ -16,7 +16,7 @@ export default {
         return htmlResponse(renderDashboard());
       }
 
-      if (request.method === "GET" && url.pathname === "/health") {
+      if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/api/health")) {
         const clientCount = env.AUTOTRADER_KV ? (await env.AUTOTRADER_KV.list({ prefix: "client:" })).keys.length : null;
         return corsJson({
           ok: true,
@@ -50,7 +50,7 @@ export default {
         return corsJson({ ok: true, clients: details });
       }
 
-      if (request.method === "POST" && url.pathname === "/test") {
+      if (request.method === "POST" && (url.pathname === "/test" || url.pathname === "/api/test")) {
         const { text } = await readAlertPayload(request);
         const alert = parseKalkiAlert(text);
         if (!alert) return corsJson({ ok: false, skipped: "not a Kalki alert or missing grade/entry/stop/T1" }, 400);
