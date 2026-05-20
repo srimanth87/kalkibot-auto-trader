@@ -76,6 +76,8 @@
       <div><label id="keyLabel">API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
       <div><label id="secretLabel">API Secret Key</label><input id="secret" type="password" autocomplete="off" placeholder="saved - leave blank to keep"></div>
       <div><label>Min Grade</label><select id="minGrade"><option>A</option><option selected>B</option><option>C</option></select></div>
+      <div><label>Entry Order Type</label><select id="orderType"><option value="limit" selected>Limit at Entry</option><option value="market">Market</option></select></div>
+      <div><label>Order Duration</label><select id="timeInForce"><option value="gtc" selected>GTC - Keep Open</option><option value="day">Day Only</option></select></div>
       <div><label>Position Size ($)</label><input id="positionSize" type="number" value="1000"></div>
       <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
       <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
@@ -88,10 +90,14 @@
 <div id="toast"></div>
 
 <script>
+const API_BASE = 'https://kalki-alpaca-autotrader.srimanthgada87.workers.dev';
 const state = {
   clientId: localStorage.getItem('kalkiClientId') || '',
   clientToken: localStorage.getItem('kalkiClientToken') || '',
 };
+function apiFetch(path, options){
+  return fetch(API_BASE + path, options);
+}
 function headers(){return {'content-type':'application/json','x-client-id':state.clientId,'x-client-token':state.clientToken};}
 function toast(msg,type){const box=document.getElementById('toast');const el=document.createElement('div');el.className='toast '+(type||'');el.textContent=msg;box.appendChild(el);setTimeout(()=>el.remove(),4200);}
 function show(data){toast(typeof data==='string'?data:(data.error||data.skipped||data.result?.reason||'Done'),data.ok===false?'err':'ok');}
@@ -116,6 +122,14 @@ function brokerChanged(){
   document.getElementById('keyLabel').textContent=defaults.keyLabel;
   document.getElementById('secretLabel').textContent=defaults.secretLabel;
   if(!document.getElementById('endpoint').value)document.getElementById('endpoint').value=defaults.endpoint;
+  syncOrderTypeOptions();
+}
+function syncOrderTypeOptions(){
+  const broker=document.getElementById('broker').value;
+  const orderType=document.getElementById('orderType');
+  const marketOption=orderType.querySelector('option[value="market"]');
+  marketOption.disabled=broker==='tradier';
+  if(broker==='tradier'&&orderType.value==='market')orderType.value='limit';
 }
 function formSettings(){return {
   broker: document.getElementById('broker').value,
@@ -124,6 +138,8 @@ function formSettings(){return {
   key: document.getElementById('key').value,
   secret: document.getElementById('secret').value,
   minGrade: document.getElementById('minGrade').value,
+  orderType: document.getElementById('orderType').value,
+  timeInForce: document.getElementById('timeInForce').value,
   positionSize: document.getElementById('positionSize').value,
   maxTradesPerDay: document.getElementById('maxTradesPerDay').value,
   maxDollarsPerDay: document.getElementById('maxDollarsPerDay').value,
@@ -144,44 +160,47 @@ function applyClient(data){
   document.getElementById('name').value=c.name||'';
   document.getElementById('endpoint').value=c.endpoint||brokerDefaults(c.broker||'alpaca').endpoint;
   document.getElementById('minGrade').value=c.minGrade||'B';
+  document.getElementById('orderType').value=c.orderType||'limit';
+  document.getElementById('timeInForce').value=c.timeInForce||'gtc';
+  syncOrderTypeOptions();
   document.getElementById('positionSize').value=c.positionSize||1000;
   document.getElementById('maxTradesPerDay').value=c.maxTradesPerDay||'';
   document.getElementById('maxDollarsPerDay').value=c.maxDollarsPerDay||'';
 }
 async function health(){
-  const r=await fetch('/api/health');const data=await r.json();
+  const r=await apiFetch('/api/health');const data=await r.json();
   document.getElementById('mode').textContent=data.kv_bound?'Broker Paper':'KV Missing';
 }
 async function registerClient(){
-  const r=await fetch('/api/client/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formSettings())});
+  const r=await apiFetch('/api/client/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(formSettings())});
   const data=await r.json();show(data);
   if(data.ok){saveBrowserSession(data);applyClient(data);showAccessCode(data.accessCode);loadLogs();toast('Connected. Save the displayed access code for other browsers.','ok');}
 }
 async function restoreClient(){
   const accessCode=document.getElementById('accessCodeInput').value;
-  const r=await fetch('/api/client/restore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({accessCode})});
+  const r=await apiFetch('/api/client/restore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({accessCode})});
   const data=await r.json();show(data);
   if(data.ok){saveBrowserSession(data);applyClient(data);showAccessCode('');closeSettings();loadLogs();}
 }
 async function loadMe(){
   if(!state.clientId||!state.clientToken){document.getElementById('clientName').textContent='Setup';document.getElementById('enabled').textContent='OFF';document.getElementById('botToggle').disabled=true;document.getElementById('botToggle').className='bot-toggle off';document.getElementById('botToggleLabel').textContent='Not Connected';return;}
-  const r=await fetch('/api/client/me',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)applyClient(data);
+  const r=await apiFetch('/api/client/me',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)applyClient(data);
 }
 async function saveSettings(extra={}){
   const body={...formSettings(),...extra};
   if(!body.key)delete body.key;if(!body.secret)delete body.secret;
-  const r=await fetch('/api/client/settings',{method:'POST',headers:headers(),body:JSON.stringify(body)});const data=await r.json();show(data);if(data.ok)applyClient(data);
+  const r=await apiFetch('/api/client/settings',{method:'POST',headers:headers(),body:JSON.stringify(body)});const data=await r.json();show(data);if(data.ok)applyClient(data);
 }
 async function setEnabled(enabled){await saveSettings({enabled});}
 async function toggleBot(){if(!requireConnected())return;const isOn=!document.getElementById('botToggle').classList.contains('off');await setEnabled(!isOn);}
 async function pauseToday(){await saveSettings({pauseToday:true});}
 async function clearPause(){await saveSettings({clearPause:true});}
-async function testBroker(){const r=await fetch('/api/client/test-broker',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
-async function previewAlert(){const r=await fetch('/api/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.ok)addAlert(data.alert,'preview',data.decision?.reason||'Preview');}
-async function manualTrade(){if(!confirm('Place this paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
-async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();if(!data.ok){show(data);return;}renderLogs(data.logs||[]);}
+async function testBroker(){const r=await apiFetch('/api/client/test-broker',{method:'POST',headers:headers(),body:'{}'});show(await r.json());}
+async function previewAlert(){const r=await apiFetch('/api/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.ok)addAlert(data.alert,'preview',data.decision?.reason||'Preview');}
+async function manualTrade(){if(!confirm('Place this paper bracket order?'))return;const r=await apiFetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
+async function loadLogs(){const r=await apiFetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();if(!data.ok){show(data);return;}renderLogs(data.logs||[]);}
 function forgetClient(){localStorage.removeItem('kalkiClientId');localStorage.removeItem('kalkiClientToken');location.reload();}
-async function deleteProfile(){if(!requireConnected())return;if(!confirm('Delete this client profile from auto-trading?'))return;const r=await fetch('/api/client/delete',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)forgetClient();}
+async function deleteProfile(){if(!requireConnected())return;if(!confirm('Delete this client profile from auto-trading?'))return;const r=await apiFetch('/api/client/delete',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)forgetClient();}
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
 function closeSettings(event){if(event&&event.target.id!=='settingsModal')return;document.getElementById('settingsModal').classList.remove('open');}
 function addAlert(alert,status,detail){const feed=document.getElementById('alertFeed');feed.innerHTML='<div class="alert-item"><div class="badge-grade">'+(alert.grade||'?')+'</div><div><div class="ticker">'+alert.ticker+'</div><div class="prices"><span class="entry">Entry $'+Number(alert.entryPrice).toFixed(2)+'</span><span class="stop">Stop $'+Number(alert.stopPrice).toFixed(2)+'</span><span class="target">T1 $'+Number(alert.t1).toFixed(2)+'</span></div></div><div><span class="pill '+(status==='skipped'?'skip':status==='error'?'err':'')+'">'+status+'</span><div class="meta">'+(detail||'')+'</div></div></div>'+feed.innerHTML.replace('<div class="empty">Waiting for Telegram alerts...</div>','');}

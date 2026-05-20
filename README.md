@@ -14,7 +14,8 @@ The hosted app is multi-client: you post alerts in one Telegram channel with a d
 - Trade Grade A or B only.
 - Use `$1000` per trade by default.
 - Shares are `floor(1000 / entry price)`.
-- Submit a buy limit order at entry.
+- Submit a buy limit order at entry by default, or a buy market order when the client selects Market in settings.
+- Keep bracket orders open with GTC by default; users can choose Day Only in settings.
 - Attach a bracket/OTOCO order with sell limit at T1 and stop loss at the stop price.
 - Dashboard users connect their own paper broker account from the settings modal.
 - Each client can turn auto-trading on/off, pause for the day, and set daily trade/dollar limits.
@@ -117,7 +118,9 @@ curl "https://api.telegram.org/bot<NEW_AUTO_TRADER_BOT_TOKEN>/setWebhook?url=htt
 ## Broker Notes
 
 The default Alpaca endpoint is paper trading: `https://paper-api.alpaca.markets`.
+Alpaca GTC orders are good until canceled, but Alpaca automatically cancels aged GTC orders after 90 days.
 
 The default Tradier endpoint is sandbox paper trading: `https://sandbox.tradier.com`.
+Tradier OTOCO orders require the entry leg to be a limit, stop, or stop-limit order, so the dashboard keeps Market entry disabled for Tradier.
 
 For the hosted dashboard, each user enters their own broker endpoint and credentials. The browser keeps only the generated client id/token; broker credentials are encrypted in Cloudflare KV so Telegram alerts can place trades even when the user's browser is closed.

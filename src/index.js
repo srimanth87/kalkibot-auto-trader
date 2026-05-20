@@ -2,6 +2,8 @@ const DEFAULT_ALPACA_BASE_URL = "https://paper-api.alpaca.markets";
 const DEFAULT_TRADIER_BASE_URL = "https://sandbox.tradier.com";
 const DEFAULT_POSITION_SIZE = 1000;
 const DEFAULT_MIN_GRADE = "B";
+const DEFAULT_ORDER_TYPE = "limit";
+const DEFAULT_TIME_IN_FORCE = "gtc";
 const GRADE_RANK = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-"];
 
 let memoryEnabled = true;
@@ -138,6 +140,8 @@ async function handleRegisterClient(request, env) {
     duplicate.accessCodeHash = await sha256Hex(normalizeAccessCode(accessCode));
     duplicate.enabled = typeof body.enabled === "boolean" ? body.enabled : duplicate.enabled;
     duplicate.minGrade = normalizeMinGrade(body.minGrade || duplicate.minGrade || DEFAULT_MIN_GRADE);
+    duplicate.orderType = normalizeBrokerOrderType(broker, body.orderType || duplicate.orderType || DEFAULT_ORDER_TYPE);
+    duplicate.timeInForce = normalizeTimeInForce(body.timeInForce || duplicate.timeInForce || DEFAULT_TIME_IN_FORCE);
     duplicate.positionSize = normalizePositiveNumber(body.positionSize, duplicate.positionSize || DEFAULT_POSITION_SIZE);
     duplicate.maxTradesPerDay = normalizeOptionalPositiveInteger(body.maxTradesPerDay) ?? duplicate.maxTradesPerDay ?? null;
     duplicate.maxDollarsPerDay = normalizeOptionalPositiveNumber(body.maxDollarsPerDay) ?? duplicate.maxDollarsPerDay ?? null;
@@ -163,6 +167,8 @@ async function handleRegisterClient(request, env) {
     accessCodeHash: await sha256Hex(normalizeAccessCode(accessCode)),
     enabled: true,
     minGrade: normalizeMinGrade(body.minGrade || DEFAULT_MIN_GRADE),
+    orderType: normalizeBrokerOrderType(broker, body.orderType || DEFAULT_ORDER_TYPE),
+    timeInForce: normalizeTimeInForce(body.timeInForce || DEFAULT_TIME_IN_FORCE),
     positionSize: normalizePositiveNumber(body.positionSize, DEFAULT_POSITION_SIZE),
     maxTradesPerDay: normalizeOptionalPositiveInteger(body.maxTradesPerDay),
     maxDollarsPerDay: normalizeOptionalPositiveNumber(body.maxDollarsPerDay),
@@ -215,6 +221,8 @@ async function handleUpdateClient(request, env) {
   if (typeof body.enabled === "boolean") client.enabled = body.enabled;
   if (body.name != null) client.name = String(body.name).trim().slice(0, 80) || client.name;
   if (body.minGrade != null) client.minGrade = normalizeMinGrade(body.minGrade);
+  if (body.orderType != null) client.orderType = normalizeOrderType(body.orderType);
+  if (body.timeInForce != null) client.timeInForce = normalizeTimeInForce(body.timeInForce);
   if (body.positionSize != null) client.positionSize = normalizePositiveNumber(body.positionSize, client.positionSize);
   if (Object.hasOwn(body, "maxTradesPerDay")) client.maxTradesPerDay = normalizeOptionalPositiveInteger(body.maxTradesPerDay);
   if (Object.hasOwn(body, "maxDollarsPerDay")) client.maxDollarsPerDay = normalizeOptionalPositiveNumber(body.maxDollarsPerDay);
@@ -235,6 +243,7 @@ async function handleUpdateClient(request, env) {
     client.credentials = await encryptJson(env, credentials);
     client.name = client.name || account.id || "Client";
   }
+  client.orderType = normalizeBrokerOrderType(client.broker, client.orderType || DEFAULT_ORDER_TYPE);
 
   client.updatedAt = new Date().toISOString();
   await saveClient(env, client);
@@ -358,6 +367,8 @@ async function maybeTradeForClient(env, client, alert, context = {}) {
     const broker = getBrokerAdapter(client.broker);
     const brokerOrder = await broker.placeBracketOrder(env, alert, decision.shares, {
       endpoint: client.endpoint,
+      orderType: normalizeOrderType(client.orderType || DEFAULT_ORDER_TYPE),
+      timeInForce: normalizeTimeInForce(client.timeInForce || DEFAULT_TIME_IN_FORCE),
       ...credentials,
     });
 
@@ -511,7 +522,21 @@ async function placeAlpacaBracketOrder(env, alert, shares, overrides = {}) {
   const endpoint = normalizeAlpacaEndpoint(overrides.endpoint || getAlpacaBaseUrl(env));
   const key = overrides.key || env.ALPACA_KEY_ID;
   const secret = overrides.secret || env.ALPACA_SECRET_KEY;
+  const orderType = normalizeOrderType(overrides.orderType);
+  const timeInForce = normalizeTimeInForce(overrides.timeInForce);
   if (!endpoint || !key || !secret) throw new Error("Alpaca endpoint, key, and secret are required");
+  const order = {
+    symbol: alert.ticker,
+    qty: String(shares),
+    side: "buy",
+    type: orderType,
+    time_in_force: timeInForce,
+    order_class: "bracket",
+    take_profit: { limit_price: toMoney(alert.t1) },
+    stop_loss: { stop_price: toMoney(alert.stopPrice) },
+    client_order_id: buildClientOrderId(alert.ticker),
+  };
+  if (orderType === "limit") order.limit_price = toMoney(alert.entryPrice);
 
   const response = await fetch(`${endpoint}/v2/orders`, {
     method: "POST",
@@ -521,18 +546,7 @@ async function placeAlpacaBracketOrder(env, alert, shares, overrides = {}) {
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify({
-      symbol: alert.ticker,
-      qty: String(shares),
-      side: "buy",
-      type: "limit",
-      limit_price: toMoney(alert.entryPrice),
-      time_in_force: "day",
-      order_class: "bracket",
-      take_profit: { limit_price: toMoney(alert.t1) },
-      stop_loss: { stop_price: toMoney(alert.stopPrice) },
-      client_order_id: buildClientOrderId(alert.ticker),
-    }),
+    body: JSON.stringify(order),
   });
 
   const data = await response.json().catch(() => ({}));
@@ -544,16 +558,18 @@ async function placeTradierBracketOrder(env, alert, shares, overrides = {}) {
   const endpoint = normalizeTradierEndpoint(overrides.endpoint || DEFAULT_TRADIER_BASE_URL);
   const accountId = overrides.accountId;
   const token = overrides.token;
+  const orderType = normalizeOrderType(overrides.orderType);
+  const timeInForce = normalizeTimeInForce(overrides.timeInForce);
   if (!endpoint || !accountId || !token) throw new Error("Tradier endpoint, account id, and token are required");
+  if (orderType === "market") throw new Error("Tradier OTOCO entry leg does not support market orders; use Limit at Entry");
 
   const body = new URLSearchParams({
     class: "otoco",
-    duration: "day",
+    duration: timeInForce,
     "symbol[0]": alert.ticker,
     "side[0]": "buy",
     "quantity[0]": String(shares),
-    "type[0]": "limit",
-    "price[0]": toMoney(alert.entryPrice),
+    "type[0]": orderType,
     "symbol[1]": alert.ticker,
     "side[1]": "sell",
     "quantity[1]": String(shares),
@@ -566,6 +582,7 @@ async function placeTradierBracketOrder(env, alert, shares, overrides = {}) {
     "stop[2]": toMoney(alert.stopPrice),
     tag: buildClientOrderId(alert.ticker),
   });
+  if (orderType === "limit") body.set("price[0]", toMoney(alert.entryPrice));
 
   const response = await fetch(`${endpoint}/v1/accounts/${encodeURIComponent(accountId)}/orders`, {
     method: "POST",
@@ -721,6 +738,8 @@ function publicClient(client) {
     endpoint: client.endpoint,
     enabled: client.enabled,
     minGrade: client.minGrade,
+    orderType: normalizeBrokerOrderType(client.broker, client.orderType || DEFAULT_ORDER_TYPE),
+    timeInForce: normalizeTimeInForce(client.timeInForce || DEFAULT_TIME_IN_FORCE),
     positionSize: client.positionSize,
     maxTradesPerDay: client.maxTradesPerDay,
     maxDollarsPerDay: client.maxDollarsPerDay,
@@ -894,6 +913,18 @@ function normalizeBroker(value) {
 function normalizeMinGrade(value) {
   const grade = String(value || DEFAULT_MIN_GRADE).trim().toUpperCase().charAt(0);
   return ["A", "B", "C"].includes(grade) ? grade : DEFAULT_MIN_GRADE;
+}
+
+function normalizeOrderType(value) {
+  return String(value || DEFAULT_ORDER_TYPE).trim().toLowerCase() === "market" ? "market" : DEFAULT_ORDER_TYPE;
+}
+
+function normalizeTimeInForce(value) {
+  return String(value || DEFAULT_TIME_IN_FORCE).trim().toLowerCase() === "day" ? "day" : DEFAULT_TIME_IN_FORCE;
+}
+
+function normalizeBrokerOrderType(broker, value) {
+  return normalizeBroker(broker) === "tradier" ? DEFAULT_ORDER_TYPE : normalizeOrderType(value);
 }
 
 function normalizePositiveNumber(value, fallback) {
@@ -1084,6 +1115,8 @@ function renderDashboard() {
       <div><label id="keyLabel">API Key ID</label><input id="key" autocomplete="off" placeholder="saved - leave blank to keep"></div>
       <div><label id="secretLabel">API Secret Key</label><input id="secret" type="password" autocomplete="off" placeholder="saved - leave blank to keep"></div>
       <div><label>Min Grade</label><select id="minGrade"><option>A</option><option selected>B</option><option>C</option></select></div>
+      <div><label>Entry Order Type</label><select id="orderType"><option value="limit" selected>Limit at Entry</option><option value="market">Market</option></select></div>
+      <div><label>Order Duration</label><select id="timeInForce"><option value="gtc" selected>GTC - Keep Open</option><option value="day">Day Only</option></select></div>
       <div><label>Position Size ($)</label><input id="positionSize" type="number" value="1000"></div>
       <div><label>Max Trades Per Day</label><input id="maxTradesPerDay" type="number" placeholder="blank = unlimited"></div>
       <div><label>Max Dollars Per Day</label><input id="maxDollarsPerDay" type="number" placeholder="blank = unlimited"></div>
@@ -1124,6 +1157,14 @@ function brokerChanged(){
   document.getElementById('keyLabel').textContent=defaults.keyLabel;
   document.getElementById('secretLabel').textContent=defaults.secretLabel;
   if(!document.getElementById('endpoint').value)document.getElementById('endpoint').value=defaults.endpoint;
+  syncOrderTypeOptions();
+}
+function syncOrderTypeOptions(){
+  const broker=document.getElementById('broker').value;
+  const orderType=document.getElementById('orderType');
+  const marketOption=orderType.querySelector('option[value="market"]');
+  marketOption.disabled=broker==='tradier';
+  if(broker==='tradier'&&orderType.value==='market')orderType.value='limit';
 }
 function formSettings(){return {
   broker: document.getElementById('broker').value,
@@ -1132,6 +1173,8 @@ function formSettings(){return {
   key: document.getElementById('key').value,
   secret: document.getElementById('secret').value,
   minGrade: document.getElementById('minGrade').value,
+  orderType: document.getElementById('orderType').value,
+  timeInForce: document.getElementById('timeInForce').value,
   positionSize: document.getElementById('positionSize').value,
   maxTradesPerDay: document.getElementById('maxTradesPerDay').value,
   maxDollarsPerDay: document.getElementById('maxDollarsPerDay').value,
@@ -1152,6 +1195,9 @@ function applyClient(data){
   document.getElementById('name').value=c.name||'';
   document.getElementById('endpoint').value=c.endpoint||brokerDefaults(c.broker||'alpaca').endpoint;
   document.getElementById('minGrade').value=c.minGrade||'B';
+  document.getElementById('orderType').value=c.orderType||'limit';
+  document.getElementById('timeInForce').value=c.timeInForce||'gtc';
+  syncOrderTypeOptions();
   document.getElementById('positionSize').value=c.positionSize||1000;
   document.getElementById('maxTradesPerDay').value=c.maxTradesPerDay||'';
   document.getElementById('maxDollarsPerDay').value=c.maxDollarsPerDay||'';
