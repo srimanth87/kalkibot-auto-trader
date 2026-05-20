@@ -286,7 +286,7 @@ async function handleDeleteClient(request, env) {
 }
 
 async function handleTelegramWebhook(request, env) {
-  const { text, chatId } = await readAlertPayload(request);
+  const { text, chatId, replyText } = await readAlertPayload(request);
   await writeWebhookLog(env, { chatId, textPreview: String(text || "").slice(0, 180), stage: "received" });
   if (!text) {
     await writeWebhookLog(env, { chatId, stage: "skipped", reason: "no message text" });
@@ -308,6 +308,27 @@ async function handleTelegramWebhook(request, env) {
       received_chat_id: chatId || null,
       expected_chat_id: sourceChatId,
     });
+  }
+
+  const command = parseTradeCommand(text, replyText);
+  if (command) {
+    if (!(await isTradingEnabled(env))) {
+      await sendTelegram(env, `Auto-trader globally paused. Skipped ${command.ticker} ${command.action}.`);
+      await writeWebhookLog(env, { chatId, stage: "skipped", reason: "auto-trader globally paused", ticker: command.ticker, command });
+      return corsJson({ ok: true, skipped: "auto-trader globally paused", command });
+    }
+
+    requireStorage(env);
+    const clients = await listClients(env);
+    const results = [];
+    for (const client of clients) {
+      results.push(await executeCommandForClient(env, client, command, { source: "telegram_command", chatId }));
+    }
+
+    const completed = results.filter((result) => result.status === "submitted" || result.status === "completed").length;
+    await writeWebhookLog(env, { chatId, stage: "command_processed", ticker: command.ticker, command, clientCount: results.length, completed });
+    await sendTelegram(env, `Processed ${command.ticker} ${command.label}: ${completed}/${results.length} client command(s) completed.`);
+    return corsJson({ ok: true, command, completed_count: completed, client_count: results.length, results });
   }
 
   const alert = parseKalkiAlert(text);
@@ -402,6 +423,52 @@ async function maybeTradeForClient(env, client, alert, context = {}) {
   }
 }
 
+async function executeCommandForClient(env, client, command, context = {}) {
+  const base = {
+    client_id: client.id,
+    client_name: client.name,
+    source: context.source || "unknown",
+    ticker: command.ticker,
+    command,
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    if (!client.enabled) return await logTradeSkip(env, client, { ...base, status: "skipped", reason: "client auto-trading off" });
+    if (client.pauseUntil && Date.parse(client.pauseUntil) > Date.now()) {
+      return await logTradeSkip(env, client, { ...base, status: "skipped", reason: `paused until ${client.pauseUntil}` });
+    }
+    if (command.action === "move_stop") {
+      return await logTradeSkip(env, client, { ...base, status: "skipped", reason: "move stop command is recognized but not automated yet" });
+    }
+
+    const credentials = await decryptCredentials(env, client);
+    const broker = getBrokerAdapter(client.broker);
+    const brokerResult = await broker.executeCommand(env, command, {
+      endpoint: client.endpoint,
+      ...credentials,
+    });
+
+    const result = {
+      ...base,
+      status: brokerResult.status || "completed",
+      broker: broker.id,
+      broker_result: brokerResult,
+      reason: brokerResult.reason || command.label,
+    };
+    await writeClientLog(env, client.id, result);
+    return result;
+  } catch (error) {
+    const result = {
+      ...base,
+      status: "error",
+      reason: error instanceof Error ? error.message : "Unknown command error",
+    };
+    await writeClientLog(env, client.id, result);
+    return result;
+  }
+}
+
 async function logTradeSkip(env, client, result) {
   await writeClientLog(env, client.id, result);
   return result;
@@ -412,8 +479,69 @@ async function readAlertPayload(request) {
   const post = body?.message || body?.channel_post || body?.edited_message || body?.edited_channel_post || null;
   return {
     text: body?.text || post?.text || post?.caption || "",
+    replyText: post?.reply_to_message?.text || post?.reply_to_message?.caption || "",
     chatId: post?.chat?.id != null ? String(post.chat.id) : null,
   };
+}
+
+function parseTradeCommand(text, replyText = "") {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  const ticker = extractTickerFromText(replyText) || extractTickerFromCommand(raw);
+  if (!ticker) return null;
+
+  if (/\b(move|raise|update)\s+stop\b|\bstop\s+(to\s+)?(breakeven|break even|be)\b/i.test(raw)) {
+    return { action: "move_stop", ticker, percent: null, label: "move stop", raw, replyText };
+  }
+
+  if (/\bcancel\b|\bcancel\s+orders?\b/i.test(raw)) {
+    return { action: "cancel_orders", ticker, percent: null, label: "cancel orders", raw, replyText };
+  }
+
+  if (/\b(close|exit|sell\s+all|full\s+exit)\b/i.test(raw)) {
+    return { action: "close", ticker, percent: 100, label: "close position", raw, replyText };
+  }
+
+  if (/\b(take\s+profits?|take\s+profit|trim|scale\s+out|sell\s+(half|partial|some))\b/i.test(raw)) {
+    const percent = extractCommandPercent(raw) || 50;
+    return { action: "trim", ticker, percent: clampNumber(percent, 1, 100), label: `trim ${clampNumber(percent, 1, 100)}%`, raw, replyText };
+  }
+
+  return null;
+}
+
+function extractTickerFromText(text) {
+  const raw = String(text || "");
+  const match = raw.match(/(?:^|\n)\s*⚡\s*\*?([A-Z][A-Z0-9.]{0,9})\*?/i)
+    || raw.match(/\bTicker:\s*([A-Z]{1,10})\b/i);
+  return match ? match[1].toUpperCase().replace(/[^A-Z0-9.]/g, "") : "";
+}
+
+function extractTickerFromCommand(text) {
+  const raw = String(text || "").toUpperCase();
+  const explicit = raw.match(/\b(?:FOR|ON|TICKER)\s+([A-Z][A-Z0-9.]{0,9})\b/);
+  if (explicit) return explicit[1].replace(/[^A-Z0-9.]/g, "");
+  const leading = raw.match(/^([A-Z][A-Z0-9.]{0,9})\b/);
+  if (leading && !["TAKE", "TRIM", "CLOSE", "EXIT", "SELL", "CANCEL", "MOVE", "STOP"].includes(leading[1])) {
+    return leading[1].replace(/[^A-Z0-9.]/g, "");
+  }
+  return "";
+}
+
+function extractCommandPercent(text) {
+  const raw = String(text || "");
+  const pct = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (pct) return Number.parseFloat(pct[1]);
+  if (/\bhalf\b/i.test(raw)) return 50;
+  if (/\bquarter\b/i.test(raw)) return 25;
+  return null;
+}
+
+function clampNumber(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return min;
+  return Math.max(min, Math.min(max, number));
 }
 
 function parseKalkiAlert(text) {
@@ -490,6 +618,9 @@ const alpacaBrokerAdapter = {
   async placeBracketOrder(env, alert, shares, credentials) {
     return await placeAlpacaBracketOrder(env, alert, shares, credentials);
   },
+  async executeCommand(env, command, credentials) {
+    return await executeAlpacaCommand(env, command, credentials);
+  },
   extractOrderId(order) {
     return order?.id || order?.client_order_id || null;
   },
@@ -512,6 +643,9 @@ const tradierBrokerAdapter = {
   },
   async placeBracketOrder(env, alert, shares, credentials) {
     return await placeTradierBracketOrder(env, alert, shares, credentials);
+  },
+  async executeCommand(env, command, credentials) {
+    return await executeTradierCommand(env, command, credentials);
   },
   extractOrderId(order) {
     return order?.order?.id || order?.id || null;
@@ -619,6 +753,74 @@ async function getAlpacaAccount({ endpoint, key, secret }) {
   };
 }
 
+async function executeAlpacaCommand(env, command, overrides = {}) {
+  const endpoint = normalizeAlpacaEndpoint(overrides.endpoint || getAlpacaBaseUrl(env));
+  const key = overrides.key || env.ALPACA_KEY_ID;
+  const secret = overrides.secret || env.ALPACA_SECRET_KEY;
+  if (!endpoint || !key || !secret) throw new Error("Alpaca endpoint, key, and secret are required");
+  const headers = {
+    "APCA-API-KEY-ID": key,
+    "APCA-API-SECRET-KEY": secret,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+
+  if (command.action === "cancel_orders") {
+    const canceled = await cancelAlpacaOpenOrdersForSymbol(endpoint, headers, command.ticker);
+    return { status: "completed", action: command.action, canceled_count: canceled.length, canceled };
+  }
+
+  const position = await getAlpacaPosition(endpoint, headers, command.ticker);
+  const qty = Math.abs(Number.parseFloat(position?.qty || "0"));
+  if (!Number.isFinite(qty) || qty <= 0) {
+    return { status: "skipped", action: command.action, reason: `no open ${command.ticker} position` };
+  }
+
+  const side = Number.parseFloat(position.qty) >= 0 ? "sell" : "buy";
+  const commandQty = command.action === "close" ? qty : Math.max(1, Math.floor(qty * (command.percent || 50) / 100));
+  const finalQty = Math.min(qty, commandQty);
+  const canceled = await cancelAlpacaOpenOrdersForSymbol(endpoint, headers, command.ticker);
+  const response = await fetch(`${endpoint}/v2/orders`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      symbol: command.ticker,
+      qty: String(finalQty),
+      side,
+      type: "market",
+      time_in_force: "day",
+      client_order_id: buildClientOrderId(`${command.ticker}-${command.action}`),
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || data?.error || `Alpaca ${command.action} failed with HTTP ${response.status}`);
+  return { status: "submitted", action: command.action, sold_qty: finalQty, canceled_count: canceled.length, canceled, order: data };
+}
+
+async function getAlpacaPosition(endpoint, headers, ticker) {
+  const response = await fetch(`${endpoint}/v2/positions/${encodeURIComponent(ticker)}`, { headers });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(data?.message || data?.error || `Alpaca position lookup failed with HTTP ${response.status}`);
+  return data;
+}
+
+async function cancelAlpacaOpenOrdersForSymbol(endpoint, headers, ticker) {
+  const response = await fetch(`${endpoint}/v2/orders?status=open&symbols=${encodeURIComponent(ticker)}&limit=100`, { headers });
+  const orders = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(orders?.message || orders?.error || `Alpaca open orders lookup failed with HTTP ${response.status}`);
+  const canceled = [];
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (String(order.symbol || "").toUpperCase() !== ticker) continue;
+    const cancelResponse = await fetch(`${endpoint}/v2/orders/${encodeURIComponent(order.id)}`, {
+      method: "DELETE",
+      headers,
+    });
+    if (cancelResponse.ok || cancelResponse.status === 404) canceled.push(order.id);
+  }
+  return canceled;
+}
+
 async function getTradierAccount({ endpoint, accountId, token }) {
   if (!endpoint || !accountId || !token) throw new Error("Tradier endpoint, account id, and token are required");
   const response = await fetch(`${normalizeTradierEndpoint(endpoint)}/v1/accounts/${encodeURIComponent(accountId)}/balances`, {
@@ -637,6 +839,53 @@ async function getTradierAccount({ endpoint, accountId, token }) {
     portfolio_value: balances.total_equity || null,
     raw: balances,
   };
+}
+
+async function executeTradierCommand(env, command, overrides = {}) {
+  const endpoint = normalizeTradierEndpoint(overrides.endpoint || DEFAULT_TRADIER_BASE_URL);
+  const accountId = overrides.accountId;
+  const token = overrides.token;
+  if (!endpoint || !accountId || !token) throw new Error("Tradier endpoint, account id, and token are required");
+
+  if (command.action === "cancel_orders") {
+    return { status: "skipped", action: command.action, reason: "Tradier cancel-by-symbol is not automated yet" };
+  }
+
+  const position = await getTradierPosition(endpoint, accountId, token, command.ticker);
+  const qty = Math.abs(Number.parseFloat(position?.quantity || position?.qty || "0"));
+  if (!Number.isFinite(qty) || qty <= 0) {
+    return { status: "skipped", action: command.action, reason: `no open ${command.ticker} position` };
+  }
+  const commandQty = command.action === "close" ? qty : Math.max(1, Math.floor(qty * (command.percent || 50) / 100));
+  const finalQty = Math.min(qty, commandQty);
+  const body = new URLSearchParams({
+    class: "equity",
+    symbol: command.ticker,
+    side: "sell",
+    quantity: String(finalQty),
+    type: "market",
+    duration: "day",
+    tag: buildClientOrderId(`${command.ticker}-${command.action}`),
+  });
+  const response = await fetch(`${endpoint}/v1/accounts/${encodeURIComponent(accountId)}/orders`, {
+    method: "POST",
+    headers: tradierHeaders(token, true),
+    body,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.errors?.error?.[0] || data?.errors?.error || data?.error || `Tradier ${command.action} failed with HTTP ${response.status}`);
+  return { status: "submitted", action: command.action, sold_qty: finalQty, order: data };
+}
+
+async function getTradierPosition(endpoint, accountId, token, ticker) {
+  const response = await fetch(`${endpoint}/v1/accounts/${encodeURIComponent(accountId)}/positions`, {
+    headers: tradierHeaders(token),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.errors?.error?.[0] || data?.errors?.error || data?.error || `Tradier positions lookup failed with HTTP ${response.status}`);
+  const positions = data?.positions?.position;
+  const list = Array.isArray(positions) ? positions : positions ? [positions] : [];
+  return list.find((position) => String(position.symbol || "").toUpperCase() === ticker) || null;
 }
 
 function tradierHeaders(token, form = false) {
