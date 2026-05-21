@@ -520,10 +520,11 @@ function extractTickerFromText(text) {
 
 function extractTickerFromCommand(text) {
   const raw = String(text || "").toUpperCase();
-  const explicit = raw.match(/\b(?:FOR|ON|TICKER)\s+([A-Z][A-Z0-9.]{0,9})\b/);
+  const explicit = raw.match(/\b(?:FOR|ON|TICKER)\s+([A-Z][A-Z0-9.]{0,9})\b/)
+    || raw.match(/\b(?:TRIM|CLOSE|EXIT|CANCEL)\s+([A-Z][A-Z0-9.]{0,9})\b/);
   if (explicit) return explicit[1].replace(/[^A-Z0-9.]/g, "");
   const leading = raw.match(/^([A-Z][A-Z0-9.]{0,9})\b/);
-  if (leading && !["TAKE", "TRIM", "CLOSE", "EXIT", "SELL", "CANCEL", "MOVE", "STOP"].includes(leading[1])) {
+  if (leading && !["TAKE", "TRIM", "CLOSE", "EXIT", "SELL", "CANCEL", "MOVE", "STOP", "TARGET", "PROFIT", "PROFITS", "REACHED"].includes(leading[1])) {
     return leading[1].replace(/[^A-Z0-9.]/g, "");
   }
   return "";
