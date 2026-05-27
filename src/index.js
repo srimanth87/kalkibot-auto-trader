@@ -93,6 +93,10 @@ export default {
         return await handleClientLogs(request, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/api/client/refresh-pnl") {
+        return await handleRefreshClientPnl(request, env);
+      }
+
       if (request.method === "POST" && url.pathname === "/api/client/delete") {
         return await handleDeleteClient(request, env);
       }
@@ -279,6 +283,12 @@ async function handleClientLogs(request, env) {
   return corsJson({ ok: true, logs });
 }
 
+async function handleRefreshClientPnl(request, env) {
+  const { client } = await requireClientAuth(request, env);
+  const result = await refreshClientPnl(env, client);
+  return corsJson({ ok: true, ...result, day: await getDayStats(env, client.id) });
+}
+
 async function handleDeleteClient(request, env) {
   const { client } = await requireClientAuth(request, env);
   await deleteClient(env, client.id);
@@ -394,6 +404,7 @@ async function maybeTradeForClient(env, client, alert, context = {}) {
     });
 
     await updateDayStats(env, client.id, {
+      ...dayStats,
       tradeCount: dayStats.tradeCount + 1,
       notional: nextNotional,
     });
@@ -467,6 +478,133 @@ async function executeCommandForClient(env, client, command, context = {}) {
     await writeClientLog(env, client.id, result);
     return result;
   }
+}
+
+async function refreshClientPnl(env, client) {
+  requireStorage(env);
+  const brokerId = normalizeBroker(client.broker);
+  if (brokerId !== "alpaca") {
+    return { broker: brokerId, checked: 0, closed: 0, skipped: "Realized P/L refresh is currently implemented for Alpaca only." };
+  }
+
+  const credentials = await decryptCredentials(env, client);
+  const endpoint = normalizeAlpacaEndpoint(client.endpoint || DEFAULT_ALPACA_BASE_URL);
+  const headers = alpacaHeaders(credentials.key, credentials.secret);
+  const logs = await listClientLogs(env, client.id, 250);
+  const submittedOrders = logs.filter(
+    (log) =>
+      log.status === "submitted" &&
+      normalizeBroker(log.broker) === "alpaca" &&
+      log.broker_order_id &&
+      log.alert?.ticker &&
+      log.decision?.shares,
+  );
+
+  let checked = 0;
+  let closed = 0;
+  let open = 0;
+  let errors = 0;
+  const realized = [];
+
+  for (const log of submittedOrders) {
+    const markerKey = `pnl:${client.id}:${log.broker_order_id}`;
+    if (await env.AUTOTRADER_KV.get(markerKey)) continue;
+
+    checked += 1;
+    try {
+      const order = await getAlpacaOrder(endpoint, headers, log.broker_order_id);
+      const pnl = buildAlpacaRealizedPnl(log, order);
+      if (!pnl) {
+        open += 1;
+        continue;
+      }
+
+      const entry = {
+        client_id: client.id,
+        client_name: client.name,
+        source: "alpaca_sync",
+        type: "realized_pnl",
+        status: pnl.realized_pnl >= 0 ? "profit" : "loss",
+        ticker: log.alert.ticker,
+        alert: log.alert,
+        broker: "alpaca",
+        broker_order_id: log.broker_order_id,
+        parent_order_id: log.broker_order_id,
+        exit_order_id: pnl.exit_order_id,
+        entry_fill_price: pnl.entry_fill_price,
+        exit_fill_price: pnl.exit_fill_price,
+        filled_qty: pnl.filled_qty,
+        exit_reason: pnl.exit_reason,
+        realized_pnl: pnl.realized_pnl,
+        realized_pnl_pct: pnl.realized_pnl_pct,
+        message: `${pnl.exit_reason} ${pnl.realized_pnl >= 0 ? "+" : ""}$${pnl.realized_pnl.toFixed(2)} (${pnl.realized_pnl_pct.toFixed(2)}%)`,
+        created_at: new Date().toISOString(),
+      };
+      await writeClientLog(env, client.id, entry);
+      await env.AUTOTRADER_KV.put(markerKey, JSON.stringify({ logged_at: entry.created_at, realized_pnl: pnl.realized_pnl }));
+      await addRealizedPnlToDayStats(env, client.id, pnl.realized_pnl);
+      realized.push(entry);
+      closed += 1;
+    } catch (error) {
+      errors += 1;
+      await writeClientLog(env, client.id, {
+        client_id: client.id,
+        client_name: client.name,
+        source: "alpaca_sync",
+        type: "realized_pnl_sync",
+        status: "error",
+        ticker: log.alert?.ticker,
+        broker: "alpaca",
+        broker_order_id: log.broker_order_id,
+        reason: error instanceof Error ? error.message : "P/L refresh failed",
+        created_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  return { broker: "alpaca", checked, closed, open, errors, realized };
+}
+
+async function getAlpacaOrder(endpoint, headers, orderId) {
+  const response = await fetch(`${endpoint}/v2/orders/${encodeURIComponent(orderId)}?nested=true`, { headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || data?.error || `Alpaca order lookup failed with HTTP ${response.status}`);
+  return data;
+}
+
+function buildAlpacaRealizedPnl(log, order) {
+  const entryFill = nullableNumber(order?.filled_avg_price) ?? nullableNumber(log.broker_order?.filled_avg_price) ?? nullableNumber(log.alert?.entryPrice);
+  const entryQty = nullableNumber(order?.filled_qty) ?? nullableNumber(order?.qty) ?? nullableNumber(log.decision?.shares);
+  if (!entryFill || !entryQty) return null;
+
+  const legs = Array.isArray(order?.legs) ? order.legs : [];
+  const filledExit = legs.find((leg) => String(leg.side || "").toLowerCase() === "sell" && String(leg.status || "").toLowerCase() === "filled" && nullableNumber(leg.filled_avg_price));
+  if (!filledExit) return null;
+
+  const exitFill = nullableNumber(filledExit.filled_avg_price);
+  const exitQty = nullableNumber(filledExit.filled_qty) ?? nullableNumber(filledExit.qty) ?? entryQty;
+  if (!exitFill || !exitQty) return null;
+
+  const filledQty = Math.min(entryQty, exitQty);
+  const realizedPnl = roundMoney((exitFill - entryFill) * filledQty);
+  return {
+    exit_order_id: filledExit.id || null,
+    entry_fill_price: entryFill,
+    exit_fill_price: exitFill,
+    filled_qty: filledQty,
+    exit_reason: alpacaExitReason(filledExit, log.alert),
+    realized_pnl: realizedPnl,
+    realized_pnl_pct: entryFill ? ((exitFill - entryFill) / entryFill) * 100 : 0,
+  };
+}
+
+function alpacaExitReason(order, alert) {
+  const type = String(order?.type || "").toLowerCase();
+  const limitPrice = nullableNumber(order?.limit_price);
+  const stopPrice = nullableNumber(order?.stop_price);
+  if (type === "limit" || (limitPrice && alert?.t1 && Math.abs(limitPrice - alert.t1) < 0.02)) return "T1";
+  if (type === "stop" || type === "stop_limit" || (stopPrice && alert?.stopPrice && Math.abs(stopPrice - alert.stopPrice) < 0.02)) return "Stop";
+  return "Exit";
 }
 
 async function logTradeSkip(env, client, result) {
@@ -734,11 +872,7 @@ async function getAlpacaAccount({ endpoint, key, secret }) {
   if (!endpoint || !key || !secret) throw new Error("Alpaca endpoint, key, and secret are required");
   const response = await fetch(`${normalizeAlpacaEndpoint(endpoint)}/v2/account`, {
     method: "GET",
-    headers: {
-      "APCA-API-KEY-ID": key,
-      "APCA-API-SECRET-KEY": secret,
-      Accept: "application/json",
-    },
+    headers: alpacaHeaders(key, secret),
   });
 
   const data = await response.json().catch(() => ({}));
@@ -759,12 +893,7 @@ async function executeAlpacaCommand(env, command, overrides = {}) {
   const key = overrides.key || env.ALPACA_KEY_ID;
   const secret = overrides.secret || env.ALPACA_SECRET_KEY;
   if (!endpoint || !key || !secret) throw new Error("Alpaca endpoint, key, and secret are required");
-  const headers = {
-    "APCA-API-KEY-ID": key,
-    "APCA-API-SECRET-KEY": secret,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
+  const headers = alpacaHeaders(key, secret, true);
 
   if (command.action === "cancel_orders") {
     const canceled = await cancelAlpacaOpenOrdersForSymbol(endpoint, headers, command.ticker);
@@ -1049,12 +1178,25 @@ async function listWebhookLogs(env, limit = 25) {
 }
 
 async function getDayStats(env, clientId) {
-  if (!env.AUTOTRADER_KV) return { tradeCount: 0, notional: 0 };
-  return (await env.AUTOTRADER_KV.get(`day:${clientId}:${todayKey()}`, "json")) || { tradeCount: 0, notional: 0 };
+  if (!env.AUTOTRADER_KV) return emptyDayStats();
+  return { ...emptyDayStats(), ...((await env.AUTOTRADER_KV.get(`day:${clientId}:${todayKey()}`, "json")) || {}) };
 }
 
 async function updateDayStats(env, clientId, stats) {
   await env.AUTOTRADER_KV.put(`day:${clientId}:${todayKey()}`, JSON.stringify(stats), { expirationTtl: 60 * 60 * 48 });
+}
+
+async function addRealizedPnlToDayStats(env, clientId, amount) {
+  const stats = await getDayStats(env, clientId);
+  await updateDayStats(env, clientId, {
+    ...stats,
+    realizedPnl: roundMoney((Number(stats.realizedPnl) || 0) + (Number(amount) || 0)),
+    closedTrades: (Number(stats.closedTrades) || 0) + 1,
+  });
+}
+
+function emptyDayStats() {
+  return { tradeCount: 0, notional: 0, realizedPnl: 0, closedTrades: 0 };
 }
 
 async function isTradingEnabled(env) {
@@ -1158,6 +1300,26 @@ function normalizeTradierEndpoint(value) {
 
 function normalizeBroker(value) {
   return String(value || "alpaca").trim().toLowerCase() === "tradier" ? "tradier" : "alpaca";
+}
+
+function alpacaHeaders(key, secret, json = false) {
+  const headers = {
+    "APCA-API-KEY-ID": key,
+    "APCA-API-SECRET-KEY": secret,
+    Accept: "application/json",
+  };
+  if (json) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
+function nullableNumber(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
 }
 
 function normalizeMinGrade(value) {
@@ -1299,7 +1461,7 @@ function renderDashboard() {
     .container{max-width:1320px;margin:0 auto;padding:18px 20px 36px}header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:4px 0 16px;border-bottom:1px solid var(--border);margin-bottom:20px}
     .logo{display:flex;gap:12px;align-items:center}.logo-icon{width:38px;height:38px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;color:#001018;font-weight:900;box-shadow:0 0 22px rgba(0,212,255,.25)}h1{font-size:22px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);line-height:1}.logo span{display:block;margin-top:5px;font:10px var(--mono);letter-spacing:4px;color:var(--muted);text-transform:uppercase}
     .header-actions{display:flex;align-items:center;gap:12px}.mode-badge{font:11px var(--mono);letter-spacing:2px;padding:5px 10px;border:1px solid var(--warn);border-radius:4px;color:var(--warn);background:rgba(255,179,71,.08);text-transform:uppercase}.icon-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--accent);cursor:pointer;font-size:17px}.bot-toggle{position:relative;display:flex;align-items:center;gap:10px;padding:8px 16px;border-radius:6px;border:1px solid var(--accent2);background:rgba(0,255,136,.05);color:var(--accent2);font:12px var(--mono);font-weight:900;letter-spacing:1px;text-transform:uppercase;cursor:pointer}.bot-toggle:disabled{opacity:.55;cursor:not-allowed}.bot-toggle.off{border-color:var(--danger);color:var(--danger);background:rgba(255,59,107,.06)}.bot-switch{width:42px;height:22px;border-radius:999px;background:rgba(0,255,136,.16);border:1px solid var(--border);position:relative}.bot-switch:after{content:'';position:absolute;top:3px;left:23px;width:14px;height:14px;border-radius:50%;background:var(--accent2);transition:left .2s,background .2s}.bot-toggle.off .bot-switch{background:rgba(255,59,107,.12)}.bot-toggle.off .bot-switch:after{left:3px;background:var(--danger)}
-    .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;position:relative;overflow:hidden}.stat-card:after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent);opacity:.55}.stat-card.green:after{background:var(--accent2)}.stat-card.warn:after{background:var(--warn)}.stat-label{font:10px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:7px}.stat-value{font:27px var(--mono);font-weight:800;color:var(--text);line-height:1}.stat-value.accent{color:var(--accent)}.stat-value.green{color:var(--accent2)}.stat-value.red{color:var(--danger)}
+    .stats{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:18px}.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;position:relative;overflow:hidden}.stat-card:after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent);opacity:.55}.stat-card.green:after{background:var(--accent2)}.stat-card.warn:after{background:var(--warn)}.stat-label{font:10px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:7px}.stat-value{font:27px var(--mono);font-weight:800;color:var(--text);line-height:1}.stat-value.accent{color:var(--accent)}.stat-value.green{color:var(--accent2)}.stat-value.red{color:var(--danger)}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}.panel{background:var(--surface);border:1px solid var(--border);border-radius:9px;overflow:hidden}.panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}.panel-title{font:12px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--accent)}.panel-body{min-height:160px;max-height:310px;overflow:auto}.empty{padding:34px 16px;text-align:center;color:var(--muted);font:12px var(--mono);letter-spacing:1px}
     .alert-item,.pos-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:13px 16px;border-bottom:1px solid rgba(26,48,64,.55)}.badge-grade{width:38px;height:38px;border-radius:6px;display:grid;place-items:center;border:1px solid rgba(0,212,255,.35);background:rgba(0,212,255,.12);color:var(--accent);font-weight:900}.ticker{font:15px var(--mono);font-weight:900;color:#fff}.meta{font:11px var(--mono);color:var(--muted);margin-top:3px}.prices{display:flex;gap:10px;flex-wrap:wrap;font:11px var(--mono);margin-top:4px}.entry{color:var(--text)}.stop{color:var(--danger)}.target{color:var(--accent2)}.pill{font:10px var(--mono);letter-spacing:1px;padding:4px 8px;border-radius:4px;border:1px solid rgba(0,255,136,.25);color:var(--accent2);background:rgba(0,255,136,.08);text-transform:uppercase}.pill.skip{border-color:rgba(255,179,71,.25);color:var(--warn);background:rgba(255,179,71,.08)}.pill.err{border-color:rgba(255,59,107,.25);color:var(--danger);background:rgba(255,59,107,.08)}
     .manual{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:18px;margin-bottom:18px}.manual-title{font:11px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px}.manual-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:start}textarea,input,select{width:100%;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:6px;padding:10px 12px;font:13px var(--mono);outline:none}textarea{min-height:92px;resize:vertical}textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,212,255,.08)}button{border:1px solid var(--border);background:var(--surface2);color:var(--accent);border-radius:6px;padding:10px 15px;font-weight:800;cursor:pointer;white-space:nowrap}button.primary{background:linear-gradient(135deg,var(--accent),#0099cc);border-color:transparent;color:#001018}button.good{color:var(--accent2);border-color:rgba(0,255,136,.35)}button.danger{color:var(--danger);border-color:rgba(255,59,107,.35)}button.muted{color:var(--muted)}
@@ -1320,6 +1482,7 @@ function renderDashboard() {
     <div class="stat-card green"><div class="stat-label">Auto-Trading</div><div class="stat-value" id="enabled">--</div></div>
     <div class="stat-card"><div class="stat-label">Today Trades</div><div class="stat-value accent" id="dayTrades">0</div></div>
     <div class="stat-card green"><div class="stat-label">Today Notional</div><div class="stat-value green" id="dayNotional">$0.00</div></div>
+    <div class="stat-card green"><div class="stat-label">Today P/L</div><div class="stat-value green" id="dayPnl">$0.00</div></div>
     <div class="stat-card warn"><div class="stat-label">Min Grade</div><div class="stat-value" id="gradeStat">B</div></div>
   </section>
 
@@ -1348,7 +1511,7 @@ function renderDashboard() {
   </section>
 
   <section class="panel">
-    <div class="panel-header"><span class="panel-title">📋 Trade Log</span><button onclick="loadLogs()">Refresh</button></div>
+    <div class="panel-header"><span class="panel-title">📋 Trade Log</span><div><button onclick="refreshPnl()">Refresh P/L</button><button onclick="loadLogs()">Refresh</button></div></div>
     <table class="log-table"><thead><tr><th>Time (ET)</th><th>Ticker</th><th>Source</th><th>Status</th><th>Detail</th></tr></thead><tbody id="tradeLog"><tr><td colspan="5" class="empty">No trades yet</td></tr></tbody></table>
   </section>
 </main>
@@ -1439,6 +1602,7 @@ function applyClient(data){
   document.getElementById('botToggleLabel').textContent=c.enabled?'Bot Active':'Bot Paused';
   document.getElementById('dayTrades').textContent=data.day?.tradeCount ?? '--';
   document.getElementById('dayNotional').textContent='$'+Number(data.day?.notional||0).toFixed(2);
+  const pnl=Number(data.day?.realizedPnl||0);document.getElementById('dayPnl').textContent=(pnl>=0?'+':'')+'$'+pnl.toFixed(2);document.getElementById('dayPnl').className='stat-value '+(pnl>=0?'green':'red');
   document.getElementById('gradeStat').textContent=c.minGrade||'B';
   document.getElementById('broker').value=c.broker||'alpaca';
   brokerChanged();
@@ -1484,13 +1648,16 @@ async function testBroker(){const r=await fetch('/api/client/test-broker',{metho
 async function previewAlert(){const r=await fetch('/api/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.ok)addAlert(data.alert,'preview',data.decision?.reason||'Preview');}
 async function manualTrade(){if(!confirm('Place this paper bracket order?'))return;const r=await fetch('/api/client/manual-trade',{method:'POST',headers:headers(),body:JSON.stringify({text:document.getElementById('alert').value})});const data=await r.json();show(data);if(data.result?.alert)addAlert(data.result.alert,data.result.status,data.result.reason||'Manual');await loadLogs();await loadMe();}
 async function loadLogs(){const r=await fetch('/api/client/logs',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();if(!data.ok){show(data);return;}renderLogs(data.logs||[]);}
+async function refreshPnl(){const r=await fetch('/api/client/refresh-pnl',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data.ok?('P/L refreshed: '+(data.closed||0)+' closed, '+(data.open||0)+' open'):data);if(data.day)applyClient({client:{id:state.clientId,name:document.getElementById('clientName').textContent,enabled:!document.getElementById('botToggle').classList.contains('off'),broker:document.getElementById('broker').value,minGrade:document.getElementById('minGrade').value,endpoint:document.getElementById('endpoint').value,orderType:document.getElementById('orderType').value,timeInForce:document.getElementById('timeInForce').value,positionSize:document.getElementById('positionSize').value,maxTradesPerDay:document.getElementById('maxTradesPerDay').value,maxDollarsPerDay:document.getElementById('maxDollarsPerDay').value},day:data.day});await loadLogs();}
 function forgetClient(){localStorage.removeItem('kalkiClientId');localStorage.removeItem('kalkiClientToken');location.reload();}
 async function deleteProfile(){if(!requireConnected())return;if(!confirm('Delete this client profile from auto-trading?'))return;const r=await fetch('/api/client/delete',{method:'POST',headers:headers(),body:'{}'});const data=await r.json();show(data);if(data.ok)forgetClient();}
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
 function closeSettings(event){if(event&&event.target.id!=='settingsModal')return;document.getElementById('settingsModal').classList.remove('open');}
 function addAlert(alert,status,detail){const feed=document.getElementById('alertFeed');feed.innerHTML='<div class="alert-item"><div class="badge-grade">'+(alert.grade||'?')+'</div><div><div class="ticker">'+alert.ticker+'</div><div class="prices"><span class="entry">Entry $'+Number(alert.entryPrice).toFixed(2)+'</span><span class="stop">Stop $'+Number(alert.stopPrice).toFixed(2)+'</span><span class="target">T1 $'+Number(alert.t1).toFixed(2)+'</span></div></div><div><span class="pill '+(status==='skipped'?'skip':status==='error'?'err':'')+'">'+status+'</span><div class="meta">'+(detail||'')+'</div></div></div>'+feed.innerHTML.replace('<div class="empty">Waiting for Telegram alerts...</div>','');}
 function formatEtTime(value){if(!value)return '-';const date=new Date(value);if(Number.isNaN(date.getTime()))return '-';return new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true,timeZoneName:'short'}).format(date);}
-function renderLogs(logs){document.getElementById('orderCount').textContent=logs.length+' logs';const body=document.getElementById('tradeLog');const orders=document.getElementById('orders');if(!logs.length){body.innerHTML='<tr><td colspan="5" class="empty">No trades yet</td></tr>';orders.innerHTML='<div class="empty">No orders yet</div>';return;}body.innerHTML=logs.map(l=>{const detail=l.reason||l.message||l.broker_order_id||l.alpaca_order_id||'';return '<tr><td>'+formatEtTime(l.logged_at||l.created_at)+'</td><td>'+(l.ticker||l.alert?.ticker||'-')+'</td><td>'+(l.broker||l.source||l.type||'-')+'</td><td class="'+(l.status==='submitted'?'log-ok':l.status==='skipped'?'log-skip':l.status==='error'?'log-err':'log-open')+'">'+(l.status||'-')+'</td><td>'+detail+'</td></tr>';}).join('');orders.innerHTML=logs.slice(0,6).map(l=>{const detail=l.reason||l.message||l.broker_order_id||l.alpaca_order_id||l.source||'';return '<div class="pos-item"><div class="badge-grade">'+((l.alert?.grade)||'--')+'</div><div><div class="ticker">'+(l.ticker||l.alert?.ticker||l.type||'-')+'</div><div class="meta">'+detail+'</div></div><span class="pill '+(l.status==='skipped'?'skip':l.status==='error'?'err':'')+'">'+(l.status||'log')+'</span></div>';}).join('');}
+function logClass(l){return l.status==='profit'?'log-ok':l.status==='loss'?'log-err':l.status==='submitted'?'log-open':l.status==='skipped'?'log-skip':l.status==='error'?'log-err':'log-open';}
+function logDetail(l){if(l.type==='realized_pnl')return (l.exit_reason||'Exit')+' '+(Number(l.realized_pnl)>=0?'+':'')+'$'+Number(l.realized_pnl||0).toFixed(2)+' · '+Number(l.filled_qty||0)+' sh · $'+Number(l.entry_fill_price||0).toFixed(2)+' → $'+Number(l.exit_fill_price||0).toFixed(2);return l.reason||l.message||l.broker_order_id||l.alpaca_order_id||'';}
+function renderLogs(logs){document.getElementById('orderCount').textContent=logs.length+' logs';const body=document.getElementById('tradeLog');const orders=document.getElementById('orders');if(!logs.length){body.innerHTML='<tr><td colspan="5" class="empty">No trades yet</td></tr>';orders.innerHTML='<div class="empty">No orders yet</div>';return;}body.innerHTML=logs.map(l=>{const detail=logDetail(l);return '<tr><td>'+formatEtTime(l.logged_at||l.created_at)+'</td><td>'+(l.ticker||l.alert?.ticker||'-')+'</td><td>'+(l.broker||l.source||l.type||'-')+'</td><td class="'+logClass(l)+'">'+(l.status||'-')+'</td><td>'+detail+'</td></tr>';}).join('');orders.innerHTML=logs.slice(0,6).map(l=>{const detail=logDetail(l);return '<div class="pos-item"><div class="badge-grade">'+((l.alert?.grade)||'--')+'</div><div><div class="ticker">'+(l.ticker||l.alert?.ticker||l.type||'-')+'</div><div class="meta">'+detail+'</div></div><span class="pill '+(l.status==='skipped'?'skip':l.status==='error'||l.status==='loss'?'err':'')+'">'+(l.status||'log')+'</span></div>';}).join('');}
 function requireConnected(){
   if(state.clientId&&state.clientToken)return true;
   show('Open settings and connect a paper broker first.','warn');openSettings();
@@ -1504,6 +1671,8 @@ const originalManualTrade=manualTrade;
 manualTrade=async function(){if(!requireConnected())return;return originalManualTrade();}
 const originalLoadLogs=loadLogs;
 loadLogs=async function(){if(!requireConnected())return;return originalLoadLogs();}
+const originalRefreshPnl=refreshPnl;
+refreshPnl=async function(){if(!requireConnected())return;return originalRefreshPnl();}
 brokerChanged();
 health();loadMe().then(()=>{if(state.clientId)loadLogs();}).catch(()=>show('Open settings and connect a paper broker first.'));
 </script>
