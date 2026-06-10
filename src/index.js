@@ -363,8 +363,45 @@ async function handleTelegramWebhook(request, env) {
   await writeAlertLog(env, { alert, chatId, results });
   const submitted = results.filter((result) => result.status === "submitted").length;
   await writeWebhookLog(env, { chatId, stage: "processed", ticker: alert.ticker, clientCount: results.length, submitted });
+
+  // Forward to Robinhood dashboard worker for MCP-based execution
+  await forwardAlertToRobinhoodWorker(env, alert).catch((err) => {
+    console.error("Robinhood worker forward failed:", err?.message || err);
+  });
+
   await sendTelegram(env, `Processed ${alert.ticker}: ${submitted}/${results.length} client paper order(s) submitted.`);
   return corsJson({ ok: true, alert, submitted_count: submitted, client_count: results.length, results });
+}
+
+async function forwardAlertToRobinhoodWorker(env, alert) {
+  const workerUrl = String(env.ROBINHOOD_WORKER_URL || "").trim();
+  if (!workerUrl) return; // not configured, skip silently
+  const secret = String(env.ROBINHOOD_WORKER_SECRET || "").trim();
+
+  const payload = {
+    ticker: alert.ticker,
+    grade: alert.grade,
+    entry_price: alert.entryPrice,
+    stop_price: alert.stopPrice,
+    t1: alert.t1,
+    raw: alert.raw,
+    source: "kalki-autotrader",
+    received_at: new Date().toISOString(),
+  };
+
+  const res = await fetch(`${workerUrl}/api/alerts/ingest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Kalki-Secret": secret } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Robinhood worker returned ${res.status}: ${text.slice(0, 200)}`);
+  }
 }
 
 async function maybeTradeForClient(env, client, alert, context = {}) {
@@ -1679,3 +1716,4 @@ health();loadMe().then(()=>{if(state.clientId)loadLogs();}).catch(()=>show('Open
 </body>
 </html>`;
 }
+
